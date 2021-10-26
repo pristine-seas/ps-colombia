@@ -1,0 +1,61 @@
+---
+title: "Mangroves"
+author: "*Compiled on `r date()` by `r Sys.info()['user']`*"
+output: 
+  html_document:
+    code_folding: show
+    toc: true
+    toc_depth: 1
+    toc_float: yes
+    number_sections: false
+    theme: cerulean
+    highlight: haddock
+---
+
+```{r}
+library(raster)
+library(sf)
+library(tidyverse)
+```
+
+```{r}
+col_land <-  st_read(file.path(project_path, "data", "02_processed_data", "admin","col_land.gpkg"))
+
+col_crs <- st_crs(col_land)
+
+colombia_eez <- st_read(file.path(project_path, "data", "02_processed_data", "admin","colombia_eez.gpkg"))
+
+uac_pnch <- read_sf(file.path(project_path, "data", "01_raw_data", "uac-pnch", "LímiteUAC.shp")) %>% 
+  st_transform(crs = col_crs)
+
+drmi_gtcc <- read_sf(file.path(project_path, "data", "02_processed_data", "admin","drmi_gtcc.gpkg"))
+
+utria <- read_sf(file.path(project_path, "data", "02_processed_data", "admin","utria.gpkg"))
+```
+
+```{r}
+gmw <- read_sf(file.path(emlab_data_path, "global-mangrove-watch", "GMW_2016_v2.shp"))
+
+mangroves_uac_pnch <- gmw %>% 
+  st_make_valid() %>% 
+  st_crop(st_buffer(uac_pnch, dist = 1))
+
+write_sf(mangroves_uac_pnch, file.path(project_path, "data", "02_processed_data", "mangroves_uac_pnch.gpkg"))
+```
+
+```{r}
+mangroves_uac_pnch <- read_sf(file.path(project_path, "data", "02_processed_data", "mangroves_uac_pnch.gpkg")) %>% 
+  st_transform(crs = col_crs)
+
+ggplot()+
+  geom_sf(data = st_crop(col_land, st_union(drmi_gtcc, utria)))+
+  geom_sf(data = st_crop(mangroves_uac_pnch, st_union(drmi_gtcc, utria)), col = "transparent", fill = "darkgreen")+
+  easyR::ggtheme_map()+
+  theme(axis.ticks = element_line(), 
+        axis.text = element_text(),
+        axis.title = element_text())+
+  labs(title = "Mangroves of the gulf of Tribugá")+
+    ggsave(filename = file.path(project_path, "figures", "mangroves_drmi_gtcc.png"), 
+         dpi = 300)
+```
+

@@ -1,0 +1,232 @@
+---
+title: "Coral Reefs"
+author: "*Compiled on `r date()` by `r Sys.info()['user']`*"
+output: 
+  html_document:
+    code_folding: show
+    toc: true
+    toc_depth: 1
+    toc_float: yes
+    number_sections: false
+    theme: cerulean
+    highlight: haddock
+---
+
+```{r}
+library(raster)
+library(sf)
+library(tidyverse)
+```
+
+# Read spatial mgmt units
+
+```{r}
+col_land <-  st_read(file.path(project_path, "data", "02_processed_data", "admin","col_land.gpkg"))
+
+col_crs <- st_crs(col_land)
+
+colombia_eez <- st_read(file.path(project_path, "data", "02_processed_data", "admin","colombia_eez.gpkg"))
+
+bajos_eez <- colombia_eez %>% 
+  filter(mrgid %in% c(48985, 48984)) 
+
+colombia_caribe_eez <- st_read(file.path(project_path, "data", "02_processed_data", "admin","colombia_caribe_eez.gpkg"))
+
+colombia_pacific_eez <- st_read(file.path(project_path, "data", "02_processed_data", "admin","colombia_pacific_eez.gpkg"))
+
+col_mpas <- st_read(file.path(project_path, "data", "02_processed_data", "admin","col_mpas.gpkg"))
+
+uac_pnch <- read_sf(file.path(project_path, "data", "01_raw_data", "uac-pnch", "LímiteUAC.shp")) %>% 
+  st_transform(crs = col_crs)
+
+col_jam_joint_regime <- sf::read_sf(file.path(project_path, "data", "02_processed_data", "admin","col_jam_joint_regime.gpkg"))
+
+drmi_gtcc <- read_sf(file.path(project_path, "data", "02_processed_data", "admin","drmi_gtcc.gpkg"))
+
+utria <- read_sf(file.path(project_path, "data", "02_processed_data", "admin","utria.gpkg"))
+
+col_jam_joint_regime <- sf::read_sf(file.path(project_path, "data", "02_processed_data", "admin","col_jam_joint_regime.gpkg"))
+
+zepa <- read_sf(file.path(project_path,"data", "01_raw_data", "ZEPA", "ZEPA.shp")) %>% 
+  janitor::clean_names() %>% 
+  st_transform(crs = col_crs) 
+```
+
+# Pacific
+
+Coral reefs are rare in the Pacific Coast. A couple patches of red coral exist inside PNN Utria
+
+```{r}
+corales_pnch <- read_sf(file.path(project_path, "data", "01_raw_data", "Objetos de Conservación PNCh", "Corales", "Coral.shp")) %>% 
+  st_transform(crs = col_crs)
+
+
+ggplot()+
+  geom_sf(data = st_crop(col_land, st_buffer(uac_pnch, dist = 0)))+ 
+  geom_sf(data = corales_pnch, fill = "red", col = "red", size = 1)+
+    easyR::ggtheme_map()+
+  theme(axis.ticks = element_line(), 
+        axis.text = element_text(),
+        axis.title = element_text(),
+        legend.position = "right")+
+  labs(col = "", 
+       title = "Coral reefs in the Northern Pacific Chocó", 
+       y = "", 
+       x  = "")+
+    ggsave(filename = file.path(project_path, "figures", "coral_reefs_uac_pnch.png"), 
+         dpi = 300)
+```
+
+```{r}
+ggplot()+
+  geom_sf(data = st_crop(col_land, st_buffer(st_union(utria), dist = 0)))+ 
+  geom_sf(data = st_crop(corales_pnch, st_buffer(utria, dist = 1)), fill = "red", col = "red", size = 2)+
+  easyR::ggtheme_map()+
+  theme(axis.ticks = element_line(), 
+        axis.text = element_text(),
+        axis.title = element_text(),
+        legend.position = "right")+
+  labs(col = "", 
+       title = "Coral reefs in PNN Utria", 
+       y = "", 
+       x  = "")+
+  ggsave(filename = file.path(project_path, "figures", "coral_reefs_utria.png"), 
+         dpi = 300)
+```
+# Joint regime area
+
+```{r}
+allen_data_benthic <- st_read(file.path(project_path, "data", "01_raw_data", "ps-caribe-20211005224018","Benthic-Map", "benthic.geojson")) %>% 
+  st_transform(crs = col_crs)
+
+allen_data_geo <- st_read(file.path(project_path, "data", "01_raw_data", "ps-caribe-20211005224018","Geomorphic-Map", "geomorphic.geojson")) %>% 
+  st_transform(crs = col_crs)
+```
+```{r}
+allen_data_benthic %>% 
+  ggplot()+
+  geom_sf(aes(fill = class), show.legend = F, col = "transparent")+
+  geom_sf(data = col_jam_joint_regime, linetype = "dashed", size = .25, fill = "transparent")+
+  geom_sf(data = bajos_eez, linetype = "dashed", size = .25, fill = "transparent")+
+  easyR::ggtheme_map()+
+  theme(axis.ticks = element_line(), 
+        axis.text = element_text(),
+        axis.title = element_text(),
+        legend.position = "right")+
+    labs(col = "", 
+       title = "Coral reefs of Bajo Nuevo and Serranilla",
+       caption = "source: Allen Coral Atlas, 2021")+
+    ggsave(filename = file.path(project_path, "figures", "corals_serranila_and_bajo_nuevo.png"), 
+         dpi = 300)
+```
+
+## Serranilla
+
+```{r}
+allen_data_benthic %>% 
+  st_crop(filter(bajos_eez,
+                 territory1 == "Serranilla Bank")) %>% 
+  ggplot()+
+  geom_sf(aes(fill = class), col = "transparent")+
+  geom_sf(data = filter(bajos_eez,
+                        territory1 == "Serranilla Bank"), linetype = "dashed", size = .25, fill = "transparent")+
+  easyR::ggtheme_map()+
+  theme(axis.ticks = element_line(), 
+        axis.text = element_text(),
+        axis.title = element_text(),
+        legend.position = "right")+
+  labs(col = "", fill = "",
+       title = "Coral reefs of Serranilla",
+       subtitle = "Benthic classes",
+       caption = "source: Allen Coral Atlas, 2021")+
+  paletteer::scale_fill_paletteer_d("rcartocolor::Bold")+
+  ggsave(filename = file.path(project_path, "figures", "corals_serranila_benthic.png"), 
+         dpi = 300)
+```
+
+```{r}
+allen_data_geo %>% 
+  st_crop(filter(bajos_eez,
+                 territory1 == "Serranilla Bank")) %>% 
+  ggplot()+
+  geom_sf(aes(fill = class), col = "transparent")+
+  geom_sf(data = filter(bajos_eez,
+                        territory1 == "Serranilla Bank"), linetype = "dashed", size = .25, fill = "transparent")+
+  easyR::ggtheme_map()+
+  theme(axis.ticks = element_line(), 
+        axis.text = element_text(),
+        axis.title = element_text(),
+        legend.position = "right")+
+  labs(col = "", fill = "",       
+       subtitle = "Geomorphic classes",
+       title = "Coral reefs of Serranilla",
+       caption = "source: Allen Coral Atlas, 2021")+
+  paletteer::scale_fill_paletteer_d("rcartocolor::Bold")+
+  ggsave(filename = file.path(project_path, "figures", "corals_serranila_geomorphic.png"), 
+         dpi = 300)
+```
+## Bajo nuevo
+
+```{r}
+allen_data_benthic %>% 
+  st_crop(filter(bajos_eez,
+                 territory1 == "Bajo Nuevo Bank")) %>% 
+  ggplot()+
+  geom_sf(aes(fill = class), col = "transparent")+
+  geom_sf(data = filter(bajos_eez,
+                        territory1 == "Bajo Nuevo Bank"), linetype = "dashed", size = .25, fill = "transparent")+
+  easyR::ggtheme_map()+
+  theme(axis.ticks = element_line(), 
+        axis.text = element_text(),
+        axis.title = element_text(),
+        legend.position = "right")+
+  labs(col = "", fill = "",     
+       subtitle = "Benthic classes",
+       title = "Coral reefs of Bajo Nuevo",
+       caption = "source: Allen Coral Atlas, 2021")+
+  paletteer::scale_fill_paletteer_d("rcartocolor::Bold")+
+  ggsave(filename = file.path(project_path, "figures", "corals_bajo_nuevo_benthic.png"), 
+         dpi = 300)
+```
+
+```{r}
+allen_data_geo %>% 
+  st_crop(filter(bajos_eez,
+                 territory1 == "Bajo Nuevo Bank")) %>% 
+  ggplot()+
+  geom_sf(aes(fill = class), col = "transparent")+
+  geom_sf(data = filter(bajos_eez,
+                        territory1 == "Bajo Nuevo Bank"), linetype = "dashed", size = .25, fill = "transparent")+
+  easyR::ggtheme_map()+
+  theme(axis.ticks = element_line(), 
+        axis.text = element_text(),
+        axis.title = element_text(),
+        legend.position = "right")+
+  labs(col = "", fill = "",       
+       subtitle = "Geomorphic classes",
+       title = "Coral reefs of Bajo Nuevo",
+       caption = "source: Allen Coral Atlas, 2021")+
+  paletteer::scale_fill_paletteer_d("rcartocolor::Bold")+
+  ggsave(filename = file.path(project_path, "figures", "corals_bajo_nuevo_geomorphic.png"), 
+         dpi = 300)
+```
+## Bathymetry
+
+```{r}
+library(rasterVis)
+
+allen_data_bathy <- raster::raster(file.path(project_path, 
+                                             "data", "01_raw_data", "ps-caribe-20211005224018","Bathymetry---composite-depth", "bathymetry_0.tif")) 
+
+bajos_eez <- nngeo::st_remove_holes(bajos_eez)
+
+bathy_plot <- rasterVis::levelplot(allen_data_bathy, margin = F, main = "Bathymetry of the Northern Banks", par.settings = RdBuTheme)+
+  latticeExtra::layer(sp::sp.polygons(sf::as_Spatial(st_transform(bajos_eez, crs = crs(allen_data_bathy))), 
+                                      lwd=1, lty = 2,
+                                      col='black'))
+
+pdf(file.path(project_path, "figures", "bajos_bathymetry.pdf"))
+print(bathy_plot)
+dev.off()
+```
+

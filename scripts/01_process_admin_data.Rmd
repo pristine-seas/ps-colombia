@@ -1,0 +1,334 @@
+---
+title: "Process admin data"
+author: "*Compiled on `r date()` by `r Sys.info()['user']`*"
+output: 
+  html_document:
+    code_folding: show
+    toc: true
+    toc_depth: 1
+    toc_float: yes
+    number_sections: false
+    theme: cerulean
+    highlight: haddock
+---
+
+```{r}
+library(raster)
+library(sf)
+library(tidyverse)
+```
+
+# Land
+
+
+```{r}
+departments <- st_read(file.path(project_path, "data", "01_raw_data", "Departamentos_202110.gpkg"))
+
+col_crs <- st_crs(departments)
+
+choco_dept <- departments %>% 
+  filter(DeNombre == "Chocó")
+
+choco_dept %>% 
+  st_write(file.path(project_path, "data", "02_processed_data", "admin","choco_dept.gpkg"))
+
+col_land <- st_union(departments) %>% 
+  st_simplify(dTolerance = 100)
+
+col_land %>% 
+  st_write(file.path(project_path, "data", "02_processed_data", "admin","col_land.gpkg"))
+```
+
+# EEZ
+
+```{r}
+col_eez_area_ha <- 92866000
+
+world_eezs <- sf::st_read(file.path(emlab_data_path, "marine-regions-eez-v11","World_EEZ_v11_20191118", "eez_v11.shp")) %>%
+  sf::st_wrap_dateline(options = c("WRAPDATELINE=YES", "DATELINEOFFSET=180"), quiet = TRUE) %>%
+  janitor::clean_names()
+
+world_eezs_info <- world_eezs %>%
+  st_drop_geometry()
+
+colombia_eez <- world_eezs %>% 
+  filter(sovereign1 == "Colombia" | mrgid == 21792) %>% 
+  filter(mrgid != 48971) 
+
+colombia_eez <- colombia_eez %>% 
+  st_transform(crs = col_crs)
+```
+
+```{r}
+north_pacific_ocean <- mregions::mr_shp(key = "MarineRegions:iho", read = TRUE) %>% 
+  filter(name %in% c("North Pacific Ocean")) %>% 
+  sf::st_make_valid() %>% 
+  sf::st_wrap_dateline(options = c("WRAPDATELINE=YES", "DATELINEOFFSET=180"), quiet = TRUE) %>%
+  sf::st_simplify(preserveTopology = T, dTolerance = 100) %>% 
+  st_transform(crs = col_crs)
+
+colombia_pacific_eez <- colombia_eez %>% 
+  st_intersection(st_buffer(north_pacific_ocean, 0.05))
+
+colombia_caribe_eez <- colombia_eez %>% 
+  st_difference(st_buffer(north_pacific_ocean, 0.05))
+
+colombia_eez %>% 
+  st_write(file.path(project_path, "data", "02_processed_data", "admin","colombia_eez.gpkg"), append = F)
+
+colombia_caribe_eez %>% 
+  st_write(file.path(project_path, "data", "02_processed_data", "admin","colombia_caribe_eez.gpkg"), append = F)
+
+colombia_pacific_eez %>% 
+  st_write(file.path(project_path, "data", "02_processed_data", "admin","colombia_pacific_eez.gpkg"), append = F)
+```
+
+# Coastline
+
+```{r}
+coastline <- sf::st_read(file.path(emlab_data_path, "gshhg-shp-2.3.7", "GSHHS_shp", "f", "GSHHS_f_L1.shp"))
+
+coastline <- coastline %>% 
+  filter(id == 3) %>% # filter for south america
+  st_make_valid() %>% 
+  st_crop(colombia_eez)
+
+st_write(coastline, file.path(project_path, "data", "02_processed_data", "admin","colombia_coastline.gpkg"), append = F)
+```
+
+
+# MPAs
+
+```{r}
+protected_areas_info <- readxl::read_xlsx(file.path(project_path, "data", "01_raw_data", "reporte_areas_2021-10-12.xlsx")) %>% 
+  janitor::clean_names()
+
+marine_protected_areas_info <- protected_areas_info %>% 
+  filter(extension_maritima_acto_administrativo_en_hectareas > 0 | extension_maritima_geografica_en_hectareas > 0) 
+
+marine_protected_areas_info %>% 
+  summarize(area_protegida_marina_ha = sum(extension_maritima_geografica_en_hectareas, na.rm = T))
+```
+
+```{r}
+marine_protected_areas_info %>% 
+  group_by(categoria_de_uicn) %>% 
+  summarize(n_areas = n(),
+            area_protegida_marina_ha  = sum(extension_maritima_geografica_en_hectareas, na.rm = T),
+            percent_of_eez = 100*area_protegida_marina_ha/col_eez_area_ha)
+```
+
+```{r}
+marine_protected_areas_info %>% 
+  mutate(nombre_de_la_autoridad_ambiental = if_else(nombre_de_la_autoridad_ambiental %in% 
+                                                      c("CODECHOCÓ", "CORPOGUAJIRA", "CORPOURABÁ", "CVS", "CRC", "CARSUCRE", "CVC", "CORALINA", "CAR"), 
+                                                    "CAR", 
+                                                    nombre_de_la_autoridad_ambiental)) %>% 
+  group_by(categoria_de_manejo, categoria_de_uicn, nombre_de_la_autoridad_ambiental) %>% 
+  summarize(n_mpas = n(),
+            area_ha = sum(extension_maritima_geografica_en_hectareas, na.rm = T),
+            percent_eez = round(100*area_ha/col_eez_area_ha, 1))%>% 
+  arrange(desc(area_ha))
+```
+```{r}
+marine_protected_areas_info %>% 
+  group_by(categoria_de_uicn) %>% 
+  summarize(n_mpas = n(),
+            area_ha = sum(extension_maritima_geografica_en_hectareas, na.rm = T)) %>% 
+  arrange(desc(area_ha)) %>% 
+  ungroup() %>% 
+  mutate(area_ha/sum(area_ha),
+         area_ha/col_eez_area_ha)
+```
+
+
+```{r}
+marine_protected_areas_info %>% 
+  filter(categoria_de_uicn %in% c("II Parque nacional", "Ib Área silvesre")) %>% 
+  arrange(desc(extension_maritima_geografica_en_hectareas))
+
+marine_protected_areas_info %>% 
+  filter(categoria_de_manejo %in% c("Distritos Nacionales de Manejo Integrado")) %>% 
+  arrange(desc(extension_maritima_geografica_en_hectareas))
+```
+
+```{r}
+marine_protected_areas_info <- marine_protected_areas_info %>% 
+  mutate(nombre_del_area_protegida = stringi::stri_trans_general(str = nombre_del_area_protegida, 
+                                                                 id = "Latin-ASCII"),
+         nombre_del_area_protegida = stringr::str_to_lower(nombre_del_area_protegida))
+
+protected_areas <- read_sf(file.path(project_path, "data", "01_raw_data", "runap2", "runap2Polygon.shp"))
+
+mpas <- protected_areas %>%
+  mutate(nombre = stringi::stri_trans_general(str = nombre, id = "Latin-ASCII"),
+         nombre = stringr::str_to_lower(nombre)) %>% 
+  filter(nombre %in% marine_protected_areas_info$nombre_del_area_protegida | 
+           url %in% marine_protected_areas_info$url_externa) %>% 
+  left_join(marine_protected_areas_info %>% 
+              select(nombre_del_area_protegida, categoria_de_uicn), 
+            by = c("nombre" = "nombre_del_area_protegida")) %>% 
+  mutate(highly_protected = if_else(categoria_de_uicn %in% c("II Parque nacional", "Ib Área silvesre"), T, F)) %>% 
+  st_transform(crs = col_crs)
+```
+
+
+```{r}
+mpatlas <- sf::st_read(file.path(emlab_data_path, "mpa-atlas", "MPAtlas_20201223_clean", "mpatlas_20201223_clean.shp"))
+
+highly_mpas <- mpatlas %>% 
+  filter(country == "COL") %>% 
+  mutate(highly_protected = if_else(is_mpa == 1 & status == "Designated" & implemente == 1 & no_take %in% c("All"),
+                                    T, 
+                                    F)) %>% 
+  filter(highly_protected)
+
+no_take_seaflower <- highly_mpas %>% 
+  filter(mpa_id == 68808398) %>% 
+  transmute(nombre = name, highly_protected = T) %>% 
+  st_transform(crs = col_crs)
+```
+
+```{r}
+col_mpas <- mpas %>% 
+  bind_rows(no_take_seaflower)
+
+mpas_plot <- ggplot() + 
+  geom_sf(data = colombia_eez, linetype = "dashed", size = .25, fill = "transparent")+
+  geom_sf(data = col_land)+
+  geom_sf(data = st_simplify(col_mpas, dTolerance = 2),
+          aes(fill = highly_protected), 
+          color = "transparent")+
+  easyR::ggtheme_map()+
+  labs(title = "Marine Protected Areas in Colombia",
+       fill = "")+
+  easyR::ggtheme_map()+
+    theme(axis.ticks = element_line(), 
+        axis.text = element_text(),
+        axis.title = element_text())+
+  paletteer::scale_fill_paletteer_d(palette = "ggthemes::calc", 
+                                    labels = c("lightly protected", "highly protected"))
+
+ggsave(mpas_plot,
+       filename = file.path(project_path, "figures", "col_mpas.png"), 
+       dpi = 300)
+
+col_mpas %>% 
+  st_write(file.path(project_path, "data", "02_processed_data", "admin","col_mpas.gpkg"), append = T)
+```
+
+# ROIs
+
+```{r}
+col_jam_area <- colombia_eez %>% 
+  filter(pol_type == "Joint regime" | mrgid %in% c(48984, 48985)) %>% 
+  st_union() %>% 
+  st_as_sf() 
+
+sf::st_write(col_jam_area,
+             file.path(project_path, "data", "02_processed_data", "admin","col_jam_joint_regime.gpkg"), append = F)
+# 
+# sf::st_read(file.path(project_path, "data", "02_processed_data", "admin","col_jam_joint_regime.gpkg")) %>% 
+#   sf::st_write(file.path(project_path, "data", "02_processed_data", "admin","col_jam_joint_regime.shp"))
+```
+
+```{r}
+uac_pnch <- read_sf(file.path(project_path, "data", "01_raw_data", "uac-pnch", "LímiteUAC.shp")) %>% 
+  st_transform(crs = col_crs)
+```
+
+```{r}
+ggplot() + 
+  geom_sf(data = colombia_eez, linetype = "dashed", size = .25, fill = "transparent")+
+  geom_sf(data = col_land)+
+  geom_sf(data = col_jam_area,
+          fill = "transparent", col = "red")+
+  geom_sf(data = uac_pnch,
+          fill = "transparent", col = "orange")+
+  geom_sf(data = col_mpas %>% 
+            filter(nombre %in% c("malpelo","yurupari - malpelo")),
+          fill = "transparent", col = "navy")+
+  easyR::ggtheme_map()+
+  labs(title = "Regions of Interest",
+       subtitle ="Pristine Seas Expedition",
+       fill = "") +
+    theme(axis.ticks = element_line(), 
+        axis.text = element_text(),
+        axis.title = element_text())+
+  ggsave(filename = file.path(project_path, "figures", "rois.png"), 
+         dpi = 300)
+```
+
+```{r}
+sf::st_write(col_mpas %>% 
+               filter(nombre == "malpelo"), 
+             file.path(project_path, "data", "02_processed_data", "admin","malpelo.gpkg"), append = F)
+
+sf::st_write(col_mpas %>% 
+               filter(nombre == "yurupari - malpelo"), 
+             file.path(project_path, "data", "02_processed_data", "admin","yurupari.gpkg"), append = F)
+
+sf::st_write(col_mpas %>% 
+               filter(nombre == "utria"), 
+             file.path(project_path, "data", "02_processed_data", "admin","utria.gpkg"), append = F)
+
+sf::st_write(col_mpas %>% 
+               filter(nombre == "golfo de tribuga cabo corrientes"), 
+             file.path(project_path, "data", "02_processed_data", "admin","drmi_gtcc.gpkg"), append = F)
+```
+
+```{r}
+choco_bbox <- tribble(~longitude, ~latitude,
+                      -79.5323, 4.1676,
+                      -79.5323, 7.2124,
+                      -77.1554, 7.2124,
+                      -77.1554, 4.1676) %>% 
+  mutate(roi = "choco") %>% 
+  sf::st_as_sf(coords = c("longitude", "latitude"),
+               crs = 4326) %>% 
+  st_transform(crs = col_crs) %>% 
+  group_by(roi) %>% 
+  summarise(geometry = sf::st_combine(geometry)) %>%
+  sf::st_cast("POLYGON") %>%
+  sf::st_make_valid() 
+```
+
+```{r}
+zepa <- read_sf(file.path(project_path,"data", "01_raw_data", "ZEPA", "ZEPA.shp")) %>% 
+  st_transform(crs = col_crs)
+
+zemp <- read_sf(file.path(project_path,"data", "01_raw_data", "ZEMP", "ZEMP Min.shp"))%>% 
+  st_transform(crs = col_crs)
+
+```
+
+```{r}
+ggplot() + 
+  # geom_sf(data = uac_pnch,
+  #         fill = "transparent", col = "navy", linetype = "dashed", size = .4)+
+  geom_sf(data = col_land)+
+  geom_sf(data = colombia_pacific_eez, linetype = "dashed", size = .25, fill = "transparent")+
+  geom_sf(data = col_mpas %>% filter(nombre == "utria"),
+          fill = "transparent", 
+          aes(col = "PNN Utria"))+
+  geom_sf(data = col_mpas %>% filter(nombre == "golfo de tribuga cabo corrientes"),
+          fill = "transparent", aes(col = "DRMI-GTCC"))+
+  geom_sf(data = zemp,
+          fill = "transparent", aes(col = "ZEMP"))+
+    geom_sf(data = zepa,
+          fill = "transparent", aes(col = "ZEPA"))+
+  coord_sf(xlim = c(as.double(st_bbox(choco_bbox)["xmin"]), as.double(st_bbox(choco_bbox)["xmax"])+20000), 
+           ylim = c(as.double(st_bbox(choco_bbox)["ymin"]), as.double(st_bbox(choco_bbox)["ymax"])), 
+           expand = FALSE)+
+  easyR::ggtheme_map()+
+  theme(axis.ticks = element_line(), 
+        axis.text = element_text(),
+        axis.title = element_text())+
+  paletteer::scale_color_paletteer_d(palette = "ochRe::lorikeet")+
+  labs(title = "Spatial management in the Chocó", col = "")+
+    ggsave(filename = file.path(project_path, "figures", "spatial_mgmt_choco.png"), 
+         dpi = 300)
+```
+
+
+

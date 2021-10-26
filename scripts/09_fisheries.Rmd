@@ -1,0 +1,56 @@
+---
+title: "Fisheries"
+author: "*Compiled on `r date()` by `r Sys.info()['user']`*"
+output: 
+  html_document:
+    code_folding: show
+    toc: true
+    toc_depth: 1
+    toc_float: yes
+    number_sections: false
+    theme: cerulean
+    highlight: haddock
+---
+
+```{r}
+library(raster)
+library(sf)
+library(tidyverse)
+```
+
+```{r}
+gocp_project_dir <- "~/Google Drive/Shared drives/emlab/projects/current-projects/ocean-conservation-priorities"
+
+stocks_info <- read_rds(file.path(gocp_project_dir,
+                                  "data", "02_processed", "food_provision", "MegaData_Ray.rds")) %>%
+  select(sci_name = SciName, stockid, k = Kfin, ex_rate = ExploitationRate_BAU1_Ray, m = m_fin, r = r_fin) %>% 
+  filter(!(sci_name == "Thunnus albacares" & stockid != "YFINEPAC"))
+```
+
+# Gulf of Tribugá
+
+```{r}
+key_fished_spp <- tribble(~common_name, ~sci_name, ~tons, ~overfishing_risk,  
+                          "Albacora","Thunnus albacares",1010.3,"high*",
+                          "Merluza","Brotula clarkae",387.3,"low",
+                          "Burique","Caranx caballus",287.4,"high",
+                          "Pargo rojo","Lutjanus peru",229.6,"high",
+                          "Bravo","Seriola lalandi",224.8,"moderate",
+                          "Champeta","Sphyraena ensis",211.3,"high",
+                          "Pargo lunarejo","Lutjanus guttatus",196.8,"moderate",
+                          "Cherna roja","Hyporthodus acanthistius",177.4,"high",
+                          "Colinegro","Caranx sexfasciatus",166.4,NA,
+                          "Sierra castilla","Scomberomorus sierra",142.3,"moderate",
+                          "Picudo","Istiophorus platypterus",134.6,NA,
+                          "Zafiro","Cynoponticus coniceps",124.6,NA,
+                          "Jurel","Caranx caninus",116.4,"moderate",
+                          "Patiseca","Euthynnus lineatus",90.9, NA) 
+
+
+```
+
+```{r}
+key_fished_spp <- key_fished_spp %>% 
+  left_join(stocks_info)
+```
+

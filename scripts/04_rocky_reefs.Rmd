@@ -1,0 +1,146 @@
+---
+title: "04_rocky_reefs"
+author: "*Compiled on `r date()` by `r Sys.info()['user']`*"
+output: 
+  html_document:
+    code_folding: show
+    toc: true
+    toc_depth: 1
+    toc_float: yes
+    number_sections: false
+    theme: cerulean
+    highlight: haddock
+---
+
+```{r}
+library(raster)
+library(sf)
+library(tidyverse)
+```
+
+```{r}
+riscales_raw <- readxl::read_xlsx(file.path(project_path, "data", "01_raw_data","riscales_chasqui.xlsx"))
+
+col_land <-  st_read(file.path(project_path, "data", "02_processed_data", "admin","col_land.gpkg"))
+
+col_crs <- st_crs(col_land)
+
+colombia_eez <- st_read(file.path(project_path, "data", "02_processed_data", "admin","colombia_eez.gpkg"))
+
+drmi_gtcc <- read_sf(file.path(project_path, "data", "02_processed_data", "admin","drmi_gtcc.gpkg"))
+
+utria <- read_sf(file.path(project_path, "data", "02_processed_data", "admin","utria.gpkg"))
+```
+
+```{r}
+rename_geometry <- function(g, name){
+    current = attr(g, "sf_column")
+    names(g)[names(g)==current] = name
+    st_geometry(g)=name
+    g
+}
+
+zemp <- read_sf(file.path(project_path,"data", "01_raw_data", "ZEMP", "ZEMP Min.shp")) %>% 
+  janitor::clean_names() %>% 
+  st_transform(crs = col_crs) %>% 
+  rename_geometry("geom")
+
+zepa <- read_sf(file.path(project_path,"data", "01_raw_data", "ZEPA", "ZEPA.shp")) %>% 
+  janitor::clean_names() %>% 
+  st_transform(crs = col_crs) %>% 
+  rename_geometry("geom")
+
+uac_pnch <- read_sf(file.path(project_path, "data", "01_raw_data", "uac-pnch", "LímiteUAC.shp")) %>% 
+  st_transform(crs = col_crs) %>% 
+  rename_geometry("geom") %>% 
+  janitor::clean_names()
+
+```
+
+```{r}
+riscales_clean <- riscales_raw %>% 
+  janitor::clean_names() %>% 
+  select(nombre,  coordenada, comentarios) %>% 
+  separate(coordenada, 
+           into = c("latitud", "longitud"), sep = ",") %>% 
+  mutate(latitud = parzer::parse_lat(latitud),
+         longitud = parzer::parse_lon(longitud)) 
+
+riscales_clean_sf <- riscales_clean %>% 
+  sf::st_as_sf(coords = c("longitud", "latitud"), 
+               crs = 4326) %>% 
+  st_transform(crs = col_crs) 
+```
+
+
+```{r}
+riscales_clean_sf <- riscales_clean_sf %>% 
+  mutate(mesophotic = if_else(nombre %in% c("La Mina", "Amargal"), T, F))
+```
+
+```{r}
+rois_bind <- bind_rows(st_transform(drmi_gtcc["nombre"], crs = st_crs(zemp)),
+                 st_transform(utria["nombre"], crs = st_crs(zemp)),
+                 zemp["nombre"], zepa["nombre"]) %>% 
+  st_transform(crs = st_crs(riscales_clean_sf)) %>% 
+  rename(roi = "nombre")
+
+riscales_clean_sf <- riscales_clean_sf %>% 
+  st_join(rois_bind,
+          left = T) 
+
+riscales_clean_sf <- riscales_clean_sf %>% 
+  replace_na(list(roi = "golfo de tribuga cabo corrientes")) 
+```
+
+```{r}
+riscales_clean_sf <- riscales_clean_sf %>% 
+  cbind(st_coordinates(.)) %>%
+  arrange(desc(Y)) %>%
+  select(-X, -Y) %>% 
+  mutate(roi = if_else(row_number() <= 7, "cabo marzo", roi))
+
+riscales_clean_sf %>% 
+  replace_na(list(roi = "golfo de tribuga cabo corrientes")) %>% 
+  group_by(roi) %>% 
+  summarize(n_riscales = n())
+```
+
+```{r}
+riscales_clean_sf %>%
+  ggplot()+
+  geom_sf(aes(col = roi))+
+  geom_sf(data = st_crop(col_land, st_buffer(uac_pnch, dist = 5000)))+ 
+  easyR::ggtheme_map()+
+  theme(axis.ticks = element_line(), 
+        axis.text = element_text(),
+        axis.title = element_text(),
+        legend.position = "right")+
+  labs(col = "", 
+       title = "Rocky reefs in the Northern Pacific of Chocó", 
+       caption = "* represents a mesophotic reef", 
+       y = "", 
+       x  = "")+
+  paletteer::scale_color_paletteer_d("ggsci::default_jama", 
+                                     labels = c("Cabo Marzo", "DRMI-GTCC", "PNN Utria", "ZEPA"))+
+  geom_point(data = riscales_clean_sf%>% 
+               filter(nombre %in% c("La Mina", "Amargal")),
+             aes( geometry = geometry),
+             stat = "sf_coordinates", 
+             shape = 8,
+             col = "green")+
+  ggsave(filename = file.path(project_path, "figures", "rocky_reefs.png"), 
+         dpi = 300)
+
+```
+```{r}
+riscales_clean_sf %>% 
+  st_transform(crs = 4326) %>% 
+  dplyr::mutate(lon = sf::st_coordinates(.)[,1],
+                lat = sf::st_coordinates(.)[,2]) %>% 
+  select(nombre, lon, lat, roi, mesophotic) %>% 
+  st_drop_geometry() %>% 
+  write_csv(file.path(project_path, "data", "03_output_data", "riscales_in_rois.csv"))
+```
+
+

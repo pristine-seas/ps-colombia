@@ -1,0 +1,160 @@
+---
+title: "Seamounts"
+author: "*Compiled on `r date()` by `r Sys.info()['user']`*"
+output: 
+  html_document:
+    code_folding: show
+    toc: true
+    toc_depth: 1
+    toc_float: yes
+    number_sections: false
+    theme: cerulean
+    highlight: haddock
+---
+
+```{r}
+library(raster)
+library(sf)
+library(tidyverse)
+```
+
+# Read spatial mgmt units
+
+```{r}
+col_land <-  st_read(file.path(project_path, "data", "02_processed_data", "admin","col_land.gpkg"))
+
+col_crs <- st_crs(col_land)
+
+
+colombia_eez <- st_read(file.path(project_path, "data", "02_processed_data", "admin","colombia_eez.gpkg"))
+
+bajos_eez <- colombia_eez %>% 
+  filter(mrgid %in% c(48985, 48984)) 
+
+colombia_caribe_eez <- st_read(file.path(project_path, "data", "02_processed_data", "admin","colombia_caribe_eez.gpkg"))
+
+colombia_pacific_eez <- st_read(file.path(project_path, "data", "02_processed_data", "admin","colombia_pacific_eez.gpkg"))
+
+col_mpas <- st_read(file.path(project_path, "data", "02_processed_data", "admin","col_mpas.gpkg"))
+
+uac_pnch <- read_sf(file.path(project_path, "data", "01_raw_data", "uac-pnch", "LímiteUAC.shp"))
+
+yurupari <- read_sf(file.path(project_path, "data", "02_processed_data", "admin","yurupari.gpkg"))
+
+malpelo <- read_sf(file.path(project_path, "data", "02_processed_data", "admin","malpelo.gpkg"))
+
+drmi_gtcc <- read_sf(file.path(project_path, "data", "02_processed_data", "admin","drmi_gtcc.gpkg"))
+
+utria <- read_sf(file.path(project_path, "data", "02_processed_data", "admin","utria.gpkg"))
+
+col_jam_joint_regime <- sf::read_sf(file.path(project_path, "data", "02_processed_data", "admin","col_jam_joint_regime.gpkg"))
+```
+
+
+# Seamounts datasets
+
+```{r}
+clark_seamounts <- readxl::read_xls(file.path(emlab_data_path, 
+                                              "seamounts-clark", "Clarketal_2011_OCM_All_seamounts_values.xls"))
+
+clark_seamounts <- clark_seamounts %>% 
+  janitor::clean_names() %>% 
+  select(id, long, lat, depth, class = smt_class_poc) %>% 
+  mutate(depth_class = ifelse(depth <= 500, "<= 500m", "> 500m"))
+
+col_smts_clark <- clark_seamounts %>% 
+  st_as_sf(coords = c("long", "lat"),
+           crs = 4326) %>% 
+  st_transform(crs = col_crs) %>% 
+  filter(st_within(., st_union(colombia_eez), sparse = FALSE)[,1])
+
+yesson_smts <- sf::read_sf(file.path(emlab_data_path, "seamounts-yesson-2019", "YessonEtAl2019-Seamounts-V2.shp"))
+
+col_smts_yesson <- yesson_smts %>% 
+  janitor::clean_names() %>% 
+  st_transform(crs = col_crs) %>% 
+  filter(st_within(., st_union(colombia_eez), sparse = FALSE)[,1]) %>% 
+  mutate(depth_class = ifelse(depth > -500, "<= 500m", "> 500m") )
+
+col_smts <- col_smts_yesson %>%
+  transmute(id = peak_id, depth = depth, depth_class = depth_class, source = "yesson") %>% 
+  bind_rows(col_smts_clark %>% 
+              transmute(id = id, depth = -depth, depth_class, source = "clark"))
+
+ggplot() + 
+  geom_sf(data = colombia_eez, linetype = "dashed", size = .25, fill = "transparent")+
+  geom_sf(data = col_smts, 
+          aes(alpha = fct_rev(depth_class)), size = .7)+
+  geom_sf(data = col_land)+
+  labs(alpha = "Depth", title = "Seamounts in Colombia's EEZ")+
+  coord_sf(xlim = c(as.double(st_bbox(colombia_eez)["xmin"]), as.double(st_bbox(colombia_eez)["xmax"])+.1), 
+           ylim = c(as.double(st_bbox(colombia_eez)["ymin"]), as.double(st_bbox(colombia_eez)["ymax"])), 
+           expand = FALSE)+
+    easyR::ggtheme_map()+
+  theme(axis.ticks = element_line(), 
+        axis.text = element_text(),
+        axis.title = element_text())+
+  ggsave(filename = file.path(project_path, "figures", "seamounts.png"), 
+         dpi = 300)
+```
+## Yurupari Malpelo
+
+```{r}
+col_smts %>% 
+  filter(st_within(., st_union(yurupari, malpelo), sparse = FALSE)[,1]) %>% 
+  group_by(depth_class) %>% 
+  summarize(n())
+```
+
+```{r}
+col_smts %>% 
+  filter(st_within(., st_union(colombia_pacific_eez), sparse = FALSE)[,1]) %>% 
+  ggplot() + 
+  geom_sf( aes(alpha = fct_rev(depth_class)), size = .7)+
+  geom_sf(data = colombia_pacific_eez, linetype = "dashed", size = .25, fill = "transparent")+
+  geom_sf(data = st_crop(col_land, colombia_pacific_eez))+
+  geom_sf(data = yurupari, fill = "transparent", col = "orange")+
+  geom_sf(data = malpelo, fill = "transparent", col = "navy")+
+  labs(alpha = "Depth", title = "Seamounts around Yurupari-Malpelo")+
+  easyR::ggtheme_map()+
+  theme(axis.ticks = element_line(), 
+        axis.text = element_text(),
+        axis.title = element_text())+
+  ggsave(filename = file.path(project_path, "figures", "seamounts_yurupari_malpelo.png"), 
+         dpi = 300)
+```
+## Regimen Comun
+
+```{r}
+col_smts %>% 
+  filter(st_within(., st_union(col_jam_joint_regime), sparse = FALSE)[,1]) %>% 
+  ggplot() + 
+  geom_sf( size = .7, fill = "navy")+
+  geom_sf(data = col_jam_joint_regime, linetype = "dashed", size = .25, fill = "transparent")+
+  geom_sf(data = bajos_eez, linetype = "dashed", size = .25, fill = "transparent")+
+  labs(alpha = "Depth", 
+       title = "Seamounts in the joint regime area Colombia - Jamaica", 
+       caption = "all seamounts are shallower than 500 meters")+
+  easyR::ggtheme_map()+
+  theme(axis.ticks = element_line(), 
+        axis.text = element_text(),
+        axis.title = element_text())+
+    ggsave(filename = file.path(project_path, "figures", "seamounts_regimen_comun.png"), 
+         dpi = 300)
+```
+
+```{r}
+col_smts %>% 
+  st_join(bind_rows(yurupari, malpelo) %>% 
+            select(nombre), 
+          left = F) %>% 
+  bind_rows(st_join(col_smts, col_jam_joint_regime, left = F)) %>% 
+  replace_na(list(nombre = "regimen_comun")) %>% 
+  st_transform(crs = 4326) %>% 
+  dplyr::mutate(lon = sf::st_coordinates(.)[,1],
+                lat = sf::st_coordinates(.)[,2]) %>% 
+  select(id, lon, lat, depth, roi = nombre) %>% 
+  st_drop_geometry() %>% 
+  write_csv(file.path(project_path, "data", "03_output_data", "seamounts_in_rois.csv"))
+```
+
