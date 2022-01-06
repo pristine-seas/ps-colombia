@@ -16,40 +16,14 @@ output:
 library(raster)
 library(sf)
 library(tidyverse)
+library(ggspatial)
 ```
 
 # Read spatial mgmt units
 
 ```{r}
-col_land <-  st_read(file.path(project_path, "data", "02_processed_data", "admin","col_land.gpkg"))
-
-col_crs <- st_crs(col_land)
-
-
-colombia_eez <- st_read(file.path(project_path, "data", "02_processed_data", "admin","colombia_eez.gpkg"))
-
-bajos_eez <- colombia_eez %>% 
-  filter(mrgid %in% c(48985, 48984)) 
-
-colombia_caribe_eez <- st_read(file.path(project_path, "data", "02_processed_data", "admin","colombia_caribe_eez.gpkg"))
-
-colombia_pacific_eez <- st_read(file.path(project_path, "data", "02_processed_data", "admin","colombia_pacific_eez.gpkg"))
-
-col_mpas <- st_read(file.path(project_path, "data", "02_processed_data", "admin","col_mpas.gpkg"))
-
-uac_pnch <- read_sf(file.path(project_path, "data", "01_raw_data", "uac-pnch", "LímiteUAC.shp"))
-
-yurupari <- read_sf(file.path(project_path, "data", "02_processed_data", "admin","yurupari.gpkg"))
-
-malpelo <- read_sf(file.path(project_path, "data", "02_processed_data", "admin","malpelo.gpkg"))
-
-drmi_gtcc <- read_sf(file.path(project_path, "data", "02_processed_data", "admin","drmi_gtcc.gpkg"))
-
-utria <- read_sf(file.path(project_path, "data", "02_processed_data", "admin","utria.gpkg"))
-
-col_jam_joint_regime <- sf::read_sf(file.path(project_path, "data", "02_processed_data", "admin","col_jam_joint_regime.gpkg"))
+load(file.path(project_path, "data", "02_processed_data", "admin","common_spatial_inputs.RData"))
 ```
-
 
 # Seamounts datasets
 
@@ -81,80 +55,105 @@ col_smts <- col_smts_yesson %>%
   bind_rows(col_smts_clark %>% 
               transmute(id = id, depth = -depth, depth_class, source = "clark"))
 
-ggplot() + 
+col_background_plot+
   geom_sf(data = colombia_eez, linetype = "dashed", size = .25, fill = "transparent")+
   geom_sf(data = col_smts, 
-          aes(alpha = fct_rev(depth_class)), size = .7)+
-  geom_sf(data = col_land)+
-  labs(alpha = "Depth", title = "Seamounts in Colombia's EEZ")+
+          aes(col = fct_rev(depth_class)), size = .7, show.legend = T)+
+  labs(alpha = "Profundidad", title = "Montes submarinos")+
   coord_sf(xlim = c(as.double(st_bbox(colombia_eez)["xmin"]), as.double(st_bbox(colombia_eez)["xmax"])+.1), 
            ylim = c(as.double(st_bbox(colombia_eez)["ymin"]), as.double(st_bbox(colombia_eez)["ymax"])), 
            expand = FALSE)+
-    easyR::ggtheme_map()+
-  theme(axis.ticks = element_line(), 
-        axis.text = element_text(),
-        axis.title = element_text())+
+  ggspatial::annotation_scale(location = "br", width_hint = 0.2, style = "ticks", 
+                              pad_y = unit(0.05, units =  "native"), pad_x = unit(0.05, units =  "native") )+
+  ggspatial::annotation_north_arrow(location = "tl", which_north = "true", height = unit(0.1, "native"), width = unit(0.1, "native"),
+                                    pad_x = unit(0.05, "native"), pad_y = unit(0.05, "native"),
+                                    style = north_arrow_fancy_orienteering)+
+  paletteer::scale_color_paletteer_d(palette = "ochRe::lorikeet", name = "Profundidad")+
   ggsave(filename = file.path(project_path, "figures", "seamounts.png"), 
          dpi = 300)
 ```
-## Yurupari Malpelo
+
+# By ROI
+
+## Offshore Pacific
 
 ```{r}
-col_smts %>% 
-  filter(st_within(., st_union(yurupari, malpelo), sparse = FALSE)[,1]) %>% 
-  group_by(depth_class) %>% 
-  summarize(n())
+smts_leg_1 <- col_smts %>% 
+  st_intersection(rois_offshore_pacific) 
+
+smts_leg_1 %>% 
+  group_by(region) %>% 
+  summarize(n = n(),
+            n_sub_500 = sum(depth_class != "> 500m"))
 ```
 
 ```{r}
-col_smts %>% 
-  filter(st_within(., st_union(colombia_pacific_eez), sparse = FALSE)[,1]) %>% 
-  ggplot() + 
-  geom_sf( aes(alpha = fct_rev(depth_class)), size = .7)+
+ggplot(smts_leg_1)+
+  geom_sf()+
+  geom_sf(data = colombia_eez, linetype = "dashed", size = .25, fill = "transparent")
+```
+
+```{r}
+col_background_plot +
+  geom_sf(data = col_smts %>% 
+            filter(st_within(., st_union(colombia_pacific_eez), sparse = FALSE)[,1]),
+         aes(col = fct_rev(depth_class)), size = .7)+
   geom_sf(data = colombia_pacific_eez, linetype = "dashed", size = .25, fill = "transparent")+
-  geom_sf(data = st_crop(col_land, colombia_pacific_eez))+
   geom_sf(data = yurupari, fill = "transparent", col = "orange")+
-  geom_sf(data = malpelo, fill = "transparent", col = "navy")+
-  labs(alpha = "Depth", title = "Seamounts around Yurupari-Malpelo")+
-  easyR::ggtheme_map()+
-  theme(axis.ticks = element_line(), 
-        axis.text = element_text(),
-        axis.title = element_text())+
+  geom_sf(data = malpelo, fill = "transparent", col = "lightblue")+
+  geom_sf(data = rois_offshore_pacific, fill = "transparent", col = "navy")+
+  labs(title = "Yurupari - Malpelo / Colinas y Lomas del Pacifico",
+       subtitle = "Montes submarinos")+
+  geom_sf(data = st_crop(col_land, colombia_pacific_eez))+
+  coord_sf(xlim = c(as.double(st_bbox(colombia_pacific_eez)["xmin"]), as.double(st_bbox(colombia_pacific_eez)["xmax"])+.1), 
+           ylim = c(as.double(st_bbox(colombia_pacific_eez)["ymin"]), as.double(st_bbox(colombia_pacific_eez)["ymax"])), 
+           expand = FALSE)+
+  ggspatial::annotation_scale(location = "br", width_hint = 0.2, style = "ticks", 
+                              pad_y = unit(0.02, units =  "native"), pad_x = unit(0.02, units =  "native") )+
+  ggspatial::annotation_north_arrow(location = "tl", which_north = "true", height = unit(0.1, "native"), width = unit(0.1, "native"),
+                                    pad_x = unit(0.05, "native"), pad_y = unit(0.05, "native"),
+                                    style = north_arrow_fancy_orienteering)+
+  paletteer::scale_color_paletteer_d(palette = "ochRe::lorikeet", name = "Profundidad")+
   ggsave(filename = file.path(project_path, "figures", "seamounts_yurupari_malpelo.png"), 
-         dpi = 300)
+         dpi = 300, width = 7, height = 5)
 ```
 ## Regimen Comun
 
 ```{r}
-col_smts %>% 
-  filter(st_within(., st_union(col_jam_joint_regime), sparse = FALSE)[,1]) %>% 
-  ggplot() + 
-  geom_sf( size = .7, fill = "navy")+
-  geom_sf(data = col_jam_joint_regime, linetype = "dashed", size = .25, fill = "transparent")+
+smts_leg_3 <- col_smts %>% 
+  st_intersection(col_jam_area) 
+
+col_background_plot +
+  geom_sf(data = col_smts %>% 
+            filter(st_within(., st_union(col_jam_area), sparse = FALSE)[,1]),
+          aes(col = fct_rev(depth_class)), size = .7)+
+  geom_sf(data = col_jam_area, linetype = "dashed", size = .25, fill = "transparent")+
   geom_sf(data = bajos_eez, linetype = "dashed", size = .25, fill = "transparent")+
-  labs(alpha = "Depth", 
-       title = "Seamounts in the joint regime area Colombia - Jamaica", 
-       caption = "all seamounts are shallower than 500 meters")+
-  easyR::ggtheme_map()+
-  theme(axis.ticks = element_line(), 
-        axis.text = element_text(),
-        axis.title = element_text())+
-    ggsave(filename = file.path(project_path, "figures", "seamounts_regimen_comun.png"), 
+  labs(title = "Montes submarinos",subtitle = "Area de Regimen Comun Colombia - Jamaica")+
+  geom_sf(data = st_crop(col_land, col_jam_area))+
+  coord_sf(xlim = c(as.double(st_bbox(col_jam_area)["xmin"]), as.double(st_bbox(col_jam_area)["xmax"])+.1), 
+           ylim = c(as.double(st_bbox(col_jam_area)["ymin"]), as.double(st_bbox(col_jam_area)["ymax"])), 
+           expand = FALSE)+
+  ggspatial::annotation_scale(location = "bl", width_hint = 0.2, style = "ticks", 
+                              pad_y = unit(0.02, units =  "native"), pad_x = unit(0.02, units =  "native") )+
+  ggspatial::annotation_north_arrow(location = "bl", which_north = "true", height = unit(0.1, "native"), width = unit(0.1, "native"),
+                                    pad_x = unit(0.05, "native"), pad_y = unit(0.05, "native"),
+                                    style = north_arrow_fancy_orienteering)+
+  paletteer::scale_color_paletteer_d(palette = "ochRe::lorikeet", name = "Profundidad")+
+  theme(plot.subtitle = element_text(margin = margin(t = 0, r = 0, b = .3, l = 0, unit = "pt")))+
+      ggsave(filename = file.path(project_path, "figures", "seamounts_regimen_comun.png"), 
          dpi = 300)
 ```
 
 ```{r}
-col_smts %>% 
-  st_join(bind_rows(yurupari, malpelo) %>% 
-            select(nombre), 
-          left = F) %>% 
-  bind_rows(st_join(col_smts, col_jam_joint_regime, left = F)) %>% 
-  replace_na(list(nombre = "regimen_comun")) %>% 
+bind_rows(smts_leg_3, 
+          smts_leg_1) %>% 
+  replace_na(list(region = "Seaflower")) %>% 
   st_transform(crs = 4326) %>% 
   dplyr::mutate(lon = sf::st_coordinates(.)[,1],
                 lat = sf::st_coordinates(.)[,2]) %>% 
-  select(id, lon, lat, depth, roi = nombre) %>% 
+  select(id, lon, lat, depth, roi = region) %>% 
   st_drop_geometry() %>% 
+  mutate_at(vars(lon, lat), round, 5) %>% 
   write_csv(file.path(project_path, "data", "03_output_data", "seamounts_in_rois.csv"))
 ```
-

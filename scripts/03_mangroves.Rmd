@@ -16,24 +16,15 @@ output:
 library(raster)
 library(sf)
 library(tidyverse)
+library(ggspatial)
+
 ```
 
 ```{r}
-col_land <-  st_read(file.path(project_path, "data", "02_processed_data", "admin","col_land.gpkg"))
-
-col_crs <- st_crs(col_land)
-
-colombia_eez <- st_read(file.path(project_path, "data", "02_processed_data", "admin","colombia_eez.gpkg"))
-
-uac_pnch <- read_sf(file.path(project_path, "data", "01_raw_data", "uac-pnch", "LímiteUAC.shp")) %>% 
-  st_transform(crs = col_crs)
-
-drmi_gtcc <- read_sf(file.path(project_path, "data", "02_processed_data", "admin","drmi_gtcc.gpkg"))
-
-utria <- read_sf(file.path(project_path, "data", "02_processed_data", "admin","utria.gpkg"))
+load(file.path(project_path, "data", "02_processed_data", "admin","common_spatial_inputs.RData"))
 ```
 
-```{r}
+```{r, eval = F}
 gmw <- read_sf(file.path(emlab_data_path, "global-mangrove-watch", "GMW_2016_v2.shp"))
 
 mangroves_uac_pnch <- gmw %>% 
@@ -47,15 +38,19 @@ write_sf(mangroves_uac_pnch, file.path(project_path, "data", "02_processed_data"
 mangroves_uac_pnch <- read_sf(file.path(project_path, "data", "02_processed_data", "mangroves_uac_pnch.gpkg")) %>% 
   st_transform(crs = col_crs)
 
-ggplot()+
+col_background_plot+
   geom_sf(data = st_crop(col_land, st_union(drmi_gtcc, utria)))+
   geom_sf(data = st_crop(mangroves_uac_pnch, st_union(drmi_gtcc, utria)), col = "transparent", fill = "darkgreen")+
-  easyR::ggtheme_map()+
-  theme(axis.ticks = element_line(), 
-        axis.text = element_text(),
-        axis.title = element_text())+
-  labs(title = "Mangroves of the gulf of Tribugá")+
-    ggsave(filename = file.path(project_path, "figures", "mangroves_drmi_gtcc.png"), 
+  coord_sf(xlim = c(as.double(st_bbox(st_union(drmi_gtcc, utria))["xmin"]), as.double(st_bbox(st_union(drmi_gtcc, utria))["xmax"])+.1), 
+           ylim = c(as.double(st_bbox(st_union(drmi_gtcc, utria))["ymin"]), as.double(st_bbox(st_union(drmi_gtcc, utria))["ymax"])), 
+           expand = FALSE)+
+  ggspatial::annotation_scale(location = "br", width_hint = 0.2, style = "ticks", 
+                              pad_y = unit(0.05, units =  "native"), pad_x = unit(0.05, units =  "native") )+
+  ggspatial::annotation_north_arrow(location = "tl", which_north = "true", height = unit(0.1, "native"), width = unit(0.1, "native"),
+                                    pad_x = unit(0.05, "native"), pad_y = unit(0.05, "native"),
+                                    style = north_arrow_fancy_orienteering)+
+  labs(title = "Manglares - Golfo de Tribugá")+
+  ggsave(filename = file.path(project_path, "figures", "mangroves_drmi_gtcc.png"), 
          dpi = 300)
 ```
 

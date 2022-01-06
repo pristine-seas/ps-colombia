@@ -16,40 +16,13 @@ output:
 library(raster)
 library(sf)
 library(tidyverse)
+library(ggspatial)
 ```
 
 # Read spatial mgmt units
 
 ```{r}
-col_land <-  st_read(file.path(project_path, "data", "02_processed_data", "admin","col_land.gpkg"))
-
-col_crs <- st_crs(col_land)
-
-colombia_eez <- st_read(file.path(project_path, "data", "02_processed_data", "admin","colombia_eez.gpkg"))
-
-bajos_eez <- colombia_eez %>% 
-  filter(mrgid %in% c(48985, 48984)) 
-
-colombia_caribe_eez <- st_read(file.path(project_path, "data", "02_processed_data", "admin","colombia_caribe_eez.gpkg"))
-
-colombia_pacific_eez <- st_read(file.path(project_path, "data", "02_processed_data", "admin","colombia_pacific_eez.gpkg"))
-
-col_mpas <- st_read(file.path(project_path, "data", "02_processed_data", "admin","col_mpas.gpkg"))
-
-uac_pnch <- read_sf(file.path(project_path, "data", "01_raw_data", "uac-pnch", "LímiteUAC.shp")) %>% 
-  st_transform(crs = col_crs)
-
-col_jam_joint_regime <- sf::read_sf(file.path(project_path, "data", "02_processed_data", "admin","col_jam_joint_regime.gpkg"))
-
-drmi_gtcc <- read_sf(file.path(project_path, "data", "02_processed_data", "admin","drmi_gtcc.gpkg"))
-
-utria <- read_sf(file.path(project_path, "data", "02_processed_data", "admin","utria.gpkg"))
-
-col_jam_joint_regime <- sf::read_sf(file.path(project_path, "data", "02_processed_data", "admin","col_jam_joint_regime.gpkg"))
-
-zepa <- read_sf(file.path(project_path,"data", "01_raw_data", "ZEPA", "ZEPA.shp")) %>% 
-  janitor::clean_names() %>% 
-  st_transform(crs = col_crs) 
+load(file.path(project_path, "data", "02_processed_data", "admin","common_spatial_inputs.RData"))
 ```
 
 # Pacific
@@ -60,62 +33,101 @@ Coral reefs are rare in the Pacific Coast. A couple patches of red coral exist i
 corales_pnch <- read_sf(file.path(project_path, "data", "01_raw_data", "Objetos de Conservación PNCh", "Corales", "Coral.shp")) %>% 
   st_transform(crs = col_crs)
 
-
-ggplot()+
+col_background_plot+
   geom_sf(data = st_crop(col_land, st_buffer(uac_pnch, dist = 0)))+ 
   geom_sf(data = corales_pnch, fill = "red", col = "red", size = 1)+
-    easyR::ggtheme_map()+
-  theme(axis.ticks = element_line(), 
-        axis.text = element_text(),
-        axis.title = element_text(),
-        legend.position = "right")+
-  labs(col = "", 
-       title = "Coral reefs in the Northern Pacific Chocó", 
-       y = "", 
-       x  = "")+
-    ggsave(filename = file.path(project_path, "figures", "coral_reefs_uac_pnch.png"), 
+  coord_sf(xlim = c(as.double(st_bbox(uac_pnch)["xmin"]), as.double(st_bbox(uac_pnch)["xmax"])+.1), 
+           ylim = c(as.double(st_bbox(uac_pnch)["ymin"]), as.double(st_bbox(uac_pnch)["ymax"])), 
+           expand = FALSE)+
+  ggspatial::annotation_scale(location = "br", width_hint = 0.2, style = "ticks", 
+                              pad_y = unit(0.02, units =  "native"), pad_x = unit(0.02, units =  "native") )+
+  ggspatial::annotation_north_arrow(location = "tl", which_north = "true", height = unit(0.1, "native"), width = unit(0.1, "native"),
+                                    pad_x = unit(0.05, "native"), pad_y = unit(0.05, "native"),
+                                    style = north_arrow_fancy_orienteering)+
+  labs(title = "Arrecifes de Coral", subtitle = "Pacifico Norte Chocoano")+
+  theme(plot.subtitle = element_text(margin = margin(t = 0, r = 0, b = .3, l = 0, unit = "pt")))+
+  ggsave(filename = file.path(project_path, "figures", "coral_reefs_uac_pnch.png"), 
          dpi = 300)
 ```
 
 ```{r}
-ggplot()+
-  geom_sf(data = st_crop(col_land, st_buffer(st_union(utria), dist = 0)))+ 
-  geom_sf(data = st_crop(corales_pnch, st_buffer(utria, dist = 1)), fill = "red", col = "red", size = 2)+
-  easyR::ggtheme_map()+
-  theme(axis.ticks = element_line(), 
-        axis.text = element_text(),
-        axis.title = element_text(),
-        legend.position = "right")+
-  labs(col = "", 
-       title = "Coral reefs in PNN Utria", 
-       y = "", 
-       x  = "")+
-  ggsave(filename = file.path(project_path, "figures", "coral_reefs_utria.png"), 
+col_background_plot+
+  geom_sf(data = st_crop(col_land, st_buffer(utria, dist = 0)))+ 
+  geom_sf(data = st_crop(corales_pnch, st_buffer(utria, dist = 1)), fill = "red", col = "red", size = 0.8)+
+  coord_sf(xlim = c(as.double(st_bbox(utria)["xmin"]), as.double(st_bbox(utria)["xmax"])+.1), 
+           ylim = c(as.double(st_bbox(utria)["ymin"]), as.double(st_bbox(utria)["ymax"])), 
+           expand = FALSE)+
+  ggspatial::annotation_scale(location = "br", width_hint = 0.2, style = "ticks", 
+                              pad_y = unit(0.02, units =  "native"), pad_x = unit(0.02, units =  "native") )+
+  ggspatial::annotation_north_arrow(location = "tl", which_north = "true", height = unit(0.1, "native"), width = unit(0.1, "native"),
+                                    pad_x = unit(0.05, "native"), pad_y = unit(0.05, "native"),
+                                    style = north_arrow_fancy_orienteering)+
+  labs(title = "Arrecifes de Coral", subtitle = "PNN Utria")+
+  theme(plot.subtitle = element_text(margin = margin(t = 0, r = 0, b = .3, l = 0, unit = "pt")))+
+    ggsave(filename = file.path(project_path, "figures", "coral_reefs_utria.png"), 
          dpi = 300)
 ```
+
 # Joint regime area
 
 ```{r}
-allen_data_benthic <- st_read(file.path(project_path, "data", "01_raw_data", "ps-caribe-20211005224018","Benthic-Map", "benthic.geojson")) %>% 
+allen_data_benthic <- st_read(file.path(project_path, "data", "01_raw_data", "ps-caribe-20211005224018","Benthic-Map", "benthic.geojson"))
+
+allen_data_benthic <- allen_data_benthic %>% 
   st_transform(crs = col_crs)
 
 allen_data_geo <- st_read(file.path(project_path, "data", "01_raw_data", "ps-caribe-20211005224018","Geomorphic-Map", "geomorphic.geojson")) %>% 
   st_transform(crs = col_crs)
+
+estaciones_bajos <- read_csv(file.path(project_path, "data", "02_processed_data", "estaciones_coords.csv"))
+
+estaciones_bajos <- estaciones_bajos %>% 
+  sf::st_as_sf(coords = c("Long", "Lat"), crs = 4326) %>% 
+  st_transform(crs = st_crs(bajos_eez))
+
+estaciones_bajos <- estaciones_bajos %>% 
+  st_join(bajos_eez %>% select(territory1), left = T) %>% 
+  rename(roi = territory1) %>% 
+  replace_na(list(roi = "Bajo Alicia")) %>% 
+  select(-title)
+
+estaciones_bajos %>% 
+  st_transform(crs = 4326) %>% 
+  dplyr::mutate(lon = sf::st_coordinates(.)[,1],
+                lat = sf::st_coordinates(.)[,2]) %>% 
+  select(lon, lat, roi ) %>% 
+  st_drop_geometry() %>% 
+  mutate_at(vars(lon, lat), round, 5) %>% 
+  write_csv(file.path(project_path, "data", "03_output_data", "stations_caribe_rois.csv"))
 ```
+
 ```{r}
-allen_data_benthic %>% 
-  ggplot()+
-  geom_sf(aes(fill = class), show.legend = F, col = "transparent")+
-  geom_sf(data = col_jam_joint_regime, linetype = "dashed", size = .25, fill = "transparent")+
+seaflower_smtns <- read_csv(file.path(project_path, "data", "03_output_data", "seamounts_in_rois.csv")) %>% 
+  filter(roi == "Seaflower") %>% 
+  st_as_sf(coords = c("lon", "lat"),
+           crs = 4326) %>% 
+  st_transform(crs = col_crs)
+```
+
+```{r}
+col_background_plot+
+  geom_sf(data = allen_data_benthic,
+          aes(fill = class), show.legend = F, col = "transparent")+
+  geom_sf(data = col_jam_area, linetype = "dashed", size = .25, fill = "transparent")+
   geom_sf(data = bajos_eez, linetype = "dashed", size = .25, fill = "transparent")+
-  easyR::ggtheme_map()+
-  theme(axis.ticks = element_line(), 
-        axis.text = element_text(),
-        axis.title = element_text(),
-        legend.position = "right")+
-    labs(col = "", 
-       title = "Coral reefs of Bajo Nuevo and Serranilla",
-       caption = "source: Allen Coral Atlas, 2021")+
+  geom_sf(data = seaflower_smtns, size = .7)+
+  coord_sf(xlim = c(as.double(st_bbox(col_jam_area)["xmin"]), as.double(st_bbox(col_jam_area)["xmax"])+.1), 
+           ylim = c(as.double(st_bbox(col_jam_area)["ymin"]), as.double(st_bbox(col_jam_area)["ymax"])), 
+           expand = FALSE)+
+  ggspatial::annotation_scale(location = "bl", width_hint = 0.2, style = "ticks", 
+                              pad_y = unit(0.02, units =  "native"), pad_x = unit(0.02, units =  "native") )+
+  ggspatial::annotation_north_arrow(location = "bl", which_north = "true", height = unit(0.1, "native"), width = unit(0.1, "native"),
+                                    pad_x = unit(0.05, "native"), pad_y = unit(0.05, "native"),
+                                    style = north_arrow_fancy_orienteering)+
+  labs(col = "", 
+       title = "Arrecifes de Coral y Montes Submarinos",
+       subtitle = "Bajo Nuevo y Serranila, Área de regimen común - Colombia/Jamaica",
+       caption = "fuente: Allen Coral Atlas, 2021; Yesson et al 2019; Clark at al, 2011.")+
     ggsave(filename = file.path(project_path, "figures", "corals_serranila_and_bajo_nuevo.png"), 
          dpi = 300)
 ```
@@ -123,93 +135,136 @@ allen_data_benthic %>%
 ## Serranilla
 
 ```{r}
-allen_data_benthic %>% 
-  st_crop(filter(bajos_eez,
-                 territory1 == "Serranilla Bank")) %>% 
-  ggplot()+
-  geom_sf(aes(fill = class), col = "transparent")+
-  geom_sf(data = filter(bajos_eez,
-                        territory1 == "Serranilla Bank"), linetype = "dashed", size = .25, fill = "transparent")+
-  easyR::ggtheme_map()+
-  theme(axis.ticks = element_line(), 
-        axis.text = element_text(),
-        axis.title = element_text(),
-        legend.position = "right")+
-  labs(col = "", fill = "",
-       title = "Coral reefs of Serranilla",
-       subtitle = "Benthic classes",
-       caption = "source: Allen Coral Atlas, 2021")+
+serranilla_eez <- filter(bajos_eez, territory1 == "Serranilla Bank")
+  
+allen_data_benthic <- allen_data_benthic %>% 
+  mutate(clase = if_else(class == "Coral/Algae", "Coral/Alga",
+                         if_else(class == "Microalgal Mats", "Tapete microalgas", 
+                                 if_else(class == "Rock", "Roca", 
+                                         if_else(class == "Rubble", "Cascajo", 
+                                                 if_else(class == "Sand", "Arena", "Pastos marinos"))))))
+
+col_background_plot +
+  geom_sf(data = st_crop(allen_data_benthic, serranilla_eez),
+          aes(fill = clase), col = "transparent")+
+  geom_sf(data = serranilla_eez, linetype = "dashed", size = .25, fill = "transparent")+
+  geom_sf(data = filter(estaciones_bajos, roi == "Serranilla Bank"),
+          shape = 10)+
+  coord_sf(xlim = c(as.double(st_bbox(serranilla_eez)["xmin"]), as.double(st_bbox(serranilla_eez)["xmax"])+.1), 
+           ylim = c(as.double(st_bbox(serranilla_eez)["ymin"]), as.double(st_bbox(serranilla_eez)["ymax"])), 
+           expand = FALSE)+
+  ggspatial::annotation_scale(location = "bl", width_hint = 0.2, style = "ticks", 
+                              pad_y = unit(0.02, units =  "native"), pad_x = unit(0.02, units =  "native") )+
+  ggspatial::annotation_north_arrow(location = "bl", which_north = "true", height = unit(0.1, "native"), width = unit(0.1, "native"),
+                                    pad_x = unit(0.05, "native"), pad_y = unit(0.05, "native"),
+                                    style = north_arrow_fancy_orienteering)+
   paletteer::scale_fill_paletteer_d("rcartocolor::Bold")+
+  labs(col = "", fill = "",
+       title = "Arrecife de Coral - Serranilla",
+       subtitle = "Clases béntonicas",
+       caption = "fuente: Allen Coral Atlas, 2021")+
+  theme(plot.subtitle = element_text(margin = margin(t = 0, r = 0, b = .3, l = 0, unit = "pt")))+
   ggsave(filename = file.path(project_path, "figures", "corals_serranila_benthic.png"), 
-         dpi = 300)
+         dpi = 300, width = 7, height = 5 )
 ```
 
+
+
 ```{r}
-allen_data_geo %>% 
-  st_crop(filter(bajos_eez,
-                 territory1 == "Serranilla Bank")) %>% 
-  ggplot()+
-  geom_sf(aes(fill = class), col = "transparent")+
-  geom_sf(data = filter(bajos_eez,
-                        territory1 == "Serranilla Bank"), linetype = "dashed", size = .25, fill = "transparent")+
-  easyR::ggtheme_map()+
-  theme(axis.ticks = element_line(), 
-        axis.text = element_text(),
-        axis.title = element_text(),
-        legend.position = "right")+
-  labs(col = "", fill = "",       
-       subtitle = "Geomorphic classes",
-       title = "Coral reefs of Serranilla",
-       caption = "source: Allen Coral Atlas, 2021")+
+table(allen_data_geo$class)
+
+allen_data_geo <- allen_data_geo %>% 
+  mutate(clase = if_else(class == "Back Reef Slope", "Pendiente trasera",
+                         if_else(class == "Deep Lagoon", "Laguna profunda", 
+                                 if_else(class == "Inner Reef Flat", "Planicie interior", 
+                                         if_else(class == "Outer Reef Flat", "Planicie  exterior", 
+                                                 if_else(class == "Plateau", "Meseta", 
+                                                         if_else(class == "Reef Crest", "Cresta", 
+                                                                 if_else(class == "Reef Slope", "Pendiente", 
+                                                                         if_else(class == "Shallow Lagoon", "Laguna somera", 
+                                                                                 if_else(class == "Sheltered Reef Slope", 
+                                                                                         "Pendiente protegida", 
+                                                                                         "Planicie terrestre"))))))))))
+
+col_background_plot +
+  geom_sf(data = st_crop(allen_data_geo, serranilla_eez),
+          aes(fill = clase), col = "transparent")+
+  geom_sf(data = serranilla_eez, linetype = "dashed", size = .25, fill = "transparent")+
+  geom_sf(data = filter(estaciones_bajos, roi == "Serranilla Bank"),
+          shape = 10)+
+  coord_sf(xlim = c(as.double(st_bbox(serranilla_eez)["xmin"]), as.double(st_bbox(serranilla_eez)["xmax"])+.1), 
+           ylim = c(as.double(st_bbox(serranilla_eez)["ymin"]), as.double(st_bbox(serranilla_eez)["ymax"])), 
+           expand = FALSE)+
+  ggspatial::annotation_scale(location = "bl", width_hint = 0.2, style = "ticks", 
+                              pad_y = unit(0.02, units =  "native"), pad_x = unit(0.02, units =  "native") )+
+  ggspatial::annotation_north_arrow(location = "bl", which_north = "true", height = unit(0.1, "native"), width = unit(0.1, "native"),
+                                    pad_x = unit(0.05, "native"), pad_y = unit(0.05, "native"),
+                                    style = north_arrow_fancy_orienteering)+
   paletteer::scale_fill_paletteer_d("rcartocolor::Bold")+
+  labs(col = "", fill = "",
+       title = "Arrecife de Coral - Serranilla",
+       subtitle = "Clases geomórficas",
+       caption = "fuente: Allen Coral Atlas, 2021")+
+  theme(plot.subtitle = element_text(margin = margin(t = 0, r = 0, b = .3, l = 0, unit = "pt")))+
   ggsave(filename = file.path(project_path, "figures", "corals_serranila_geomorphic.png"), 
-         dpi = 300)
+         dpi = 300, width = 7, height = 5 )
 ```
 ## Bajo nuevo
 
 ```{r}
-allen_data_benthic %>% 
-  st_crop(filter(bajos_eez,
-                 territory1 == "Bajo Nuevo Bank")) %>% 
-  ggplot()+
-  geom_sf(aes(fill = class), col = "transparent")+
-  geom_sf(data = filter(bajos_eez,
-                        territory1 == "Bajo Nuevo Bank"), linetype = "dashed", size = .25, fill = "transparent")+
-  easyR::ggtheme_map()+
-  theme(axis.ticks = element_line(), 
-        axis.text = element_text(),
-        axis.title = element_text(),
-        legend.position = "right")+
-  labs(col = "", fill = "",     
-       subtitle = "Benthic classes",
-       title = "Coral reefs of Bajo Nuevo",
-       caption = "source: Allen Coral Atlas, 2021")+
+bajo_nuevo_eez <- filter(bajos_eez,
+                 territory1 == "Bajo Nuevo Bank")
+
+
+col_background_plot +
+  geom_sf(data = st_crop(allen_data_benthic, bajo_nuevo_eez),
+          aes(fill = clase), col = "transparent")+
+  geom_sf(data = bajo_nuevo_eez, linetype = "dashed", size = .25, fill = "transparent")+
+  geom_sf(data = filter(estaciones_bajos, roi == "Bajo Nuevo Bank"),
+          shape = 10)+
+  coord_sf(xlim = c(as.double(st_bbox(bajo_nuevo_eez)["xmin"]), as.double(st_bbox(bajo_nuevo_eez)["xmax"])+.1), 
+           ylim = c(as.double(st_bbox(bajo_nuevo_eez)["ymin"]), as.double(st_bbox(bajo_nuevo_eez)["ymax"])), 
+           expand = FALSE)+
+  ggspatial::annotation_scale(location = "bl", width_hint = 0.2, style = "ticks", 
+                              pad_y = unit(0.02, units =  "native"), pad_x = unit(0.02, units =  "native") )+
+  ggspatial::annotation_north_arrow(location = "bl", which_north = "true", height = unit(0.1, "native"), width = unit(0.1, "native"),
+                                    pad_x = unit(0.05, "native"), pad_y = unit(0.05, "native"),
+                                    style = north_arrow_fancy_orienteering)+
   paletteer::scale_fill_paletteer_d("rcartocolor::Bold")+
+  labs(col = "", fill = "",
+       title = "Arrecife de Coral - Bajo Nuevo",
+       subtitle = "Clases béntonicas",
+       caption = "fuente: Allen Coral Atlas, 2021")+
+  theme(plot.subtitle = element_text(margin = margin(t = 0, r = 0, b = .3, l = 0, unit = "pt")))+
   ggsave(filename = file.path(project_path, "figures", "corals_bajo_nuevo_benthic.png"), 
-         dpi = 300)
+         dpi = 300, width = 7, height = 5 )
 ```
 
 ```{r}
-allen_data_geo %>% 
-  st_crop(filter(bajos_eez,
-                 territory1 == "Bajo Nuevo Bank")) %>% 
-  ggplot()+
-  geom_sf(aes(fill = class), col = "transparent")+
-  geom_sf(data = filter(bajos_eez,
-                        territory1 == "Bajo Nuevo Bank"), linetype = "dashed", size = .25, fill = "transparent")+
-  easyR::ggtheme_map()+
-  theme(axis.ticks = element_line(), 
-        axis.text = element_text(),
-        axis.title = element_text(),
-        legend.position = "right")+
-  labs(col = "", fill = "",       
-       subtitle = "Geomorphic classes",
-       title = "Coral reefs of Bajo Nuevo",
-       caption = "source: Allen Coral Atlas, 2021")+
+col_background_plot +
+  geom_sf(data = st_crop(allen_data_geo, bajo_nuevo_eez),
+          aes(fill = clase), col = "transparent")+
+  geom_sf(data = bajo_nuevo_eez, linetype = "dashed", size = .25, fill = "transparent")+
+  geom_sf(data = filter(estaciones_bajos, roi == "Bajo Nuevo Bank"),
+          shape = 10)+
+  coord_sf(xlim = c(as.double(st_bbox(bajo_nuevo_eez)["xmin"]), as.double(st_bbox(bajo_nuevo_eez)["xmax"])+.1), 
+           ylim = c(as.double(st_bbox(bajo_nuevo_eez)["ymin"]), as.double(st_bbox(bajo_nuevo_eez)["ymax"])), 
+           expand = FALSE)+
+  ggspatial::annotation_scale(location = "bl", width_hint = 0.2, style = "ticks", 
+                              pad_y = unit(0.02, units =  "native"), pad_x = unit(0.02, units =  "native") )+
+  ggspatial::annotation_north_arrow(location = "bl", which_north = "true", height = unit(0.1, "native"), width = unit(0.1, "native"),
+                                    pad_x = unit(0.05, "native"), pad_y = unit(0.05, "native"),
+                                    style = north_arrow_fancy_orienteering)+
   paletteer::scale_fill_paletteer_d("rcartocolor::Bold")+
+  labs(col = "", fill = "",
+       title = "Arrecife de Coral - Bajo Nuevo",
+       subtitle = "Clases geomórficas",
+       caption = "fuente: Allen Coral Atlas, 2021")+
+  theme(plot.subtitle = element_text(margin = margin(t = 0, r = 0, b = .3, l = 0, unit = "pt")))+
   ggsave(filename = file.path(project_path, "figures", "corals_bajo_nuevo_geomorphic.png"), 
-         dpi = 300)
+         dpi = 300, width = 7, height = 5 )
 ```
+
 ## Bathymetry
 
 ```{r}
@@ -229,4 +284,5 @@ pdf(file.path(project_path, "figures", "bajos_bathymetry.pdf"))
 print(bathy_plot)
 dev.off()
 ```
+
 
