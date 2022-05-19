@@ -1,0 +1,55 @@
+---
+title: "Proceees inverts"
+author: "*Compiled on `r date()` by `r Sys.info()['user']`*"
+output: 
+  html_document:
+    code_folding: show
+    toc: true
+    toc_depth: 1
+    toc_float: yes
+    number_sections: false
+    theme: cerulean
+    highlight: haddock
+---
+
+```{r}
+library(tidyverse)
+library(ggspatial)
+library(stringr)
+library(lubridate)
+```
+
+
+```{r}
+edna_metadata <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/edna/eDNA_Meso_Metadata_Colombia.xlsx",
+                                        sheet = "Metadata") 
+```
+
+
+```{r}
+edna_metadata <- edna_metadata %>% 
+  mutate(depth_m = round(if_else(str_detect(depth_m, "ft"), 
+                           parse_number(depth_m)*0.3048, 
+                           parse_number(depth_m)), 2)) 
+```
+
+```{r}
+edna_metadata %>% 
+  group_by(leg) %>% 
+  summarize(n_sampled_days = n_distinct(date), 
+            n_stations = n_distinct(ps_sample_id),
+            n_samples = sum(n_replicates),
+            water_lts = sum(n_replicates*water_quantity_liters),
+            n_negs = n_distinct(date[neg == "T"]),
+            n_sterivex = sum(n_replicates[filter_type == "sterivex"]))
+```
+```{r}
+edna_metadata %>% 
+  select(date, ps_station_id, ps_sample_id, collection_time, location,
+         lat, lon, depth_m, n_replicates,\ water_quantity_liters, filter_type, neg) 
+  write_csv("/Volumes/Colombia - 2022/paperwork/export_permit/PS_COL_EDNA_metadata.csv")
+```
+
+
+
+

@@ -388,6 +388,11 @@ col_background_plot+
   ggsave(filename = file.path(project_path, "figures", "rois.png"), 
          dpi = 300)
 ```
+```{r}
+malpelo <- sf::st_read(file.path(project_path, "data", "02_processed_data", "admin","malpelo.gpkg"))
+
+st_area(malpelo)/10^6*2
+```
 
 
 ```{r}

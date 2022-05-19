@@ -1,0 +1,429 @@
+---
+title: "07_deepsee_dacor"
+author: "*Compiled on `r date()` by `r Sys.info()['user']`*"
+output: 
+  html_document:
+    code_folding: show
+    toc: true
+    toc_depth: 1
+    toc_float: yes
+    number_sections: false
+    theme: cerulean
+    highlight: haddock
+---
+
+```{r}
+library(tidyverse)
+library(ggspatial)
+```
+
+# Metadata
+
+```{r}
+sub_meta <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/sub/_COL_sub_metadata.xlsx") %>% 
+  janitor::clean_names()
+
+sub_meta$dive_start <- sub_meta$dive_start %>% 
+  stringr::str_split(" ", simplify = T ) %>% 
+  as_tibble() %>% 
+  select(time = V2) %>% 
+  pull()
+
+sub_meta$dive_end <- sub_meta$resurface %>% 
+  stringr::str_split(" ", simplify = T ) %>% 
+  as_tibble() %>% 
+  select(time = V2) %>% 
+  pull()
+
+sub_meta <- sub_meta %>% 
+  select(ps_station_id, date, dive_start, dive_end, gps_bottom_start, max_depth, therm_start, therm_end, max_depth_temp)
+```
+
+```{r}
+sub_meta$start_lat <- sub_meta$gps_bottom_start %>%
+  str_split("N", simplify = T) %>% 
+  as_tibble() %>% 
+  select(lat = V1) %>% 
+  pull(lat) %>% 
+  str_squish() %>% 
+  str_replace("\\'", " ") %>% 
+  measurements::conv_unit(from = 'deg_dec_min', to = 'dec_deg') %>% 
+  as.numeric() %>% 
+  round(4)
+  
+sub_meta$start_lon <- sub_meta$gps_bottom_start %>%
+  str_split("N", simplify = T) %>% 
+  as_tibble() %>% 
+  select(lon = V2) %>% 
+  pull(lon) %>% 
+  str_replace("\\'", " ") %>% 
+  str_replace("W", "") %>% 
+  str_squish() %>% 
+  measurements::conv_unit(from = 'deg_dec_min', to = 'dec_deg') %>% 
+  as.numeric() %>% 
+  round(4)*-1
+```
+
+```{r}
+sub_meta <- sub_meta %>% 
+  select(-gps_bottom_start)
+```
+
+```{r}
+sub_meta <- sub_meta %>% 
+  mutate(location = if_else(date <= lubridate::ymd("2022-03-16"), "Yurupari ridge", "Golfo de Tribugá")) %>% 
+  mutate(sublocation = if_else(location == "Yurupari ridge", "Navigator bank", location))
+
+sub_meta <- sub_meta %>% 
+  select(ps_station_id, location, sublocation, date, start_time = dive_start, end_time = dive_end, 
+         start_lon, start_lat, max_depth, therm_start, therm_end, temp_at_max_depth = max_depth_temp)
+```
+
+```{r}
+sub_meta %>% 
+  filter(sublocation == "Navigator bank") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/col_phase_1/COL_sub_metadata.csv")
+```
+
+# Read taxa master list
+
+```{r}
+taxa_lut <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/sub/taxa_lut.xlsx") %>% 
+  janitor::clean_names()
+
+taxa_lut$nombre_comun <- stringr::str_to_sentence(taxa_lut$nombre_comun)
+
+taxa_lut$is_vme <- if_else(is.na(taxa_lut$is_vme), FALSE, TRUE)
+```
+
+```{r}
+taxa_lut %>% 
+  group_by(phylum) %>% 
+  summarize(n_taxa = n_distinct(taxon))
+```
+
+```{r}
+taxa_lut %>% 
+  ggplot()+
+  geom_bar(aes(phylum))+
+  coord_flip()
+```
+
+# Read each dive data
+
+## By habitat
+
+```{r}
+dacor_to_num <- function(dacor){
+  
+  dacor[dacor == "R"] <- 1
+  dacor[dacor == "O"] <- 2
+  dacor[dacor == "C"] <- 3
+  dacor[dacor == "A"] <- 4
+  dacor[dacor == "D"] <- 5
+  dacor[is.na(dacor)] <- 0
+  
+  dacor <- round(as.numeric(dacor), 2)
+  return(dacor)
+  
+}
+
+num_to_dacor <- function(dacor_num){
+  
+  dacor_num[dacor_num > 4 & dacor_num <= 5] <- "D"
+  dacor_num[dacor_num > 3 & dacor_num <= 4] <- "A"
+  dacor_num[dacor_num > 2 & dacor_num <= 3] <- "C"
+  dacor_num[dacor_num > 1 & dacor_num <= 2] <- "O"
+  dacor_num[dacor_num <= 1] <- "R"
+  
+  dacor_cat <- as.character(dacor_num)
+  
+  return(dacor_cat)
+  
+}
+```
+
+### Rocky Walls
+
+```{r}
+rocky_walls_02 <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/sub/annotations_sala_friedlander.xlsx", 
+                                    sheet = "rocky walls") %>% 
+  select(taxon, COL_sub_02 = "dive 2") %>% 
+  pivot_longer(cols = -taxon, names_to = "ps_station_id", values_to = "dacor") %>% 
+  mutate(habitat = "rocky walls",
+         dacor_num = dacor_to_num(dacor)) 
+
+janitor::get_dupes(rocky_walls_02, "taxon")
+
+rocky_walls_dacor <- rocky_walls_02 %>% 
+  left_join(taxa_lut, by = "taxon") %>% 
+  select(ps_station_id, habitat, phylum, taxon, nombre_comun, dacor, dacor_num, is_vme) %>% 
+  arrange(desc(dacor_num))
+
+# arrange by DACOR, add images for D taxa, and R taxa. 
+```
+
+### Hard bottom
+
+```{r}
+hard_bottom_02_03 <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/sub/annotations_sala_friedlander.xlsx", 
+                  sheet = "hard bottom") %>% 
+  select(taxon, COL_sub_02 = "dive 2", COL_sub_03 = "dive 3") %>% 
+  pivot_longer(cols = -taxon, names_to = "ps_station_id", values_to = "dacor") %>% 
+  filter(!is.na(dacor)) %>% 
+  mutate(dacor_num = dacor_to_num(dacor),
+         habitat = "hard bottom") %>% 
+  left_join(taxa_lut) %>% 
+  filter(!is.na(phylum)) %>% 
+  select(ps_station_id, habitat, phylum, taxon, nombre_comun, dacor, dacor_num, is_vme)
+
+hard_bottom_04 <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/sub/annotations_mayorga.xlsx", 
+                                    sheet = "hard bottom") %>% 
+  select(taxon, COL_sub_04 = "dive 4") %>% 
+  filter(!is.na(COL_sub_04)) %>% 
+  pivot_longer(cols = -taxon, names_to = "ps_station_id", values_to = "dacor") %>% 
+  mutate(dacor_num = dacor_to_num(dacor),
+         habitat = "hard bottom") %>% 
+  left_join(taxa_lut) %>% 
+  filter(!is.na(phylum)) %>% 
+  select(ps_station_id, habitat, phylum, taxon, nombre_comun, dacor, dacor_num, is_vme)
+
+hard_bottom_dacor <- hard_bottom_04 %>% 
+  bind_rows(hard_bottom_02_03) %>% 
+  arrange(desc(dacor_num))
+```
+
+```{r}
+hard_bottom_dacor %>% 
+  group_by(taxon) %>% 
+  summarize(overall_dacor_num = mean(dacor_num)) %>% 
+  mutate(overall_dacor = num_to_dacor(overall_dacor_num))
+```
+
+```{r, eval = F}
+hard_bottom_02_03 <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/sub/annotations_sala_friedlander.xlsx", 
+                                       sheet = "hard bottom") %>% 
+  select(taxon, COL_sub_02 = "dive 2", COL_sub_03 = "dive 3") %>% 
+  pivot_longer(cols = -taxon, names_to = "ps_station_id", values_to = "dacor")
+
+hard_bottom_02_03 %>% 
+  janitor::get_dupes(taxon, ps_station_id)
+
+hard_bottom_02_03 %>% 
+  left_join(taxa_lut, by = "taxon") %>% 
+  filter(is.na(phylum))
+
+hard_bottom_04 <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/sub/annotations_mayorga.xlsx", 
+                                    sheet = "hard bottom") %>% 
+  select(taxon, COL_sub_04 = "dive 4") %>% 
+  filter(!is.na(COL_sub_04))
+
+hard_bottom_04 <- hard_bottom_04 %>% 
+  pivot_longer(cols = -taxon, names_to = "ps_station_id", values_to = "dacor")
+```
+
+### Sand with pebbles
+
+```{r}
+sand_and_pebbles <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/sub/annotations_sala_friedlander.xlsx", 
+                                      sheet = "sand with pebbles") %>% 
+  select(taxon, COL_sub_01 = "dive 1", COL_sub_02 = "dive 2")
+
+sand_and_pebbles_dacor <- sand_and_pebbles %>% 
+  pivot_longer(cols = -taxon, names_to = "ps_station_id", values_to = "dacor") %>% 
+  filter(!is.na(dacor)) %>% 
+  mutate(dacor_num = dacor_to_num(dacor),
+         habitat = "sand with pebbles") %>% 
+  left_join(taxa_lut) %>% 
+  filter(!is.na(phylum)) %>% 
+  select(ps_station_id, habitat, phylum, taxon, nombre_comun, dacor, dacor_num, is_vme) %>% 
+  arrange(desc(dacor_num))
+```
+
+### Boulders
+
+```{r}
+boulders_01_03 <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/sub/annotations_sala_friedlander.xlsx", 
+                                    sheet = "boulder with ledges") %>% 
+  janitor::clean_names() %>% 
+  select(taxon, COL_sub_01 = "dive_1", COL_sub_03 = "dive_3") %>% 
+  pivot_longer(cols = -taxon, names_to = "ps_station_id", values_to = "dacor") %>% 
+  filter(!is.na(dacor)) %>% 
+  mutate(dacor_num = dacor_to_num(dacor),
+         habitat = "boulder") %>% 
+  left_join(taxa_lut) %>% 
+  filter(!is.na(phylum)) %>% 
+  select(ps_station_id, habitat, phylum, taxon, nombre_comun, dacor, dacor_num, is_vme)
+
+
+boulders_04 <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/sub/annotations_mayorga.xlsx",
+                                 sheet = "boulder with ledges") %>% 
+  select(taxon, COL_sub_04 = "dive 4") %>% 
+  pivot_longer(cols = -taxon, names_to = "ps_station_id", values_to = "dacor") %>% 
+  filter(!is.na(dacor)) %>% 
+  mutate(dacor_num = dacor_to_num(dacor),
+         habitat = "boulder") %>% 
+  left_join(taxa_lut) %>% 
+  filter(!is.na(phylum)) %>% 
+  select(ps_station_id, habitat, phylum, taxon, nombre_comun, dacor, dacor_num, is_vme)
+```
+
+```{r}
+boulders_dacor <- boulders_04 %>% 
+  bind_rows(boulders_01_03) %>% 
+  arrange(desc(dacor_num))
+```
+
+```{r}
+boulders_dacor %>% 
+  group_by(habitat, taxon) %>% 
+  summarize(overall_dacor_num = mean(dacor_num, na.rm = T)) %>% 
+  mutate(overall_dacor = num_to_dacor(overall_dacor_num))
+```
+
+### Rock and sand
+
+```{r}
+rock_and_sand_01_03 <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/sub/annotations_sala_friedlander.xlsx", 
+                                         sheet = "mixed rock and sand") %>% 
+  janitor::clean_names() %>% 
+  select(taxon, COL_sub_01 = "dive_1", COL_sub_03 = "dive_3")
+
+rock_and_sand_01_03 %>% 
+  janitor::get_dupes(taxon)
+
+rock_and_sand_01_03 <- rock_and_sand_01_03 %>% 
+  pivot_longer(cols = -taxon, names_to = "ps_station_id", values_to = "dacor") %>% 
+  filter(!is.na(dacor)) %>% 
+  mutate(dacor_num = dacor_to_num(dacor),
+         habitat = "rock and sand") %>% 
+  left_join(taxa_lut) %>% 
+  filter(!is.na(phylum)) %>% 
+  select(ps_station_id, habitat, phylum, taxon, nombre_comun, dacor, dacor_num, is_vme)
+  
+
+rock_and_sand_04 <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/sub/annotations_mayorga.xlsx", 
+                                      sheet = "mixed rock and sand") %>% 
+  select(taxon, COL_sub_04 = "dive 4") %>% 
+  pivot_longer(cols = -taxon, names_to = "ps_station_id", values_to = "dacor") %>% 
+  filter(!is.na(dacor)) %>% 
+  mutate(dacor_num = dacor_to_num(dacor),
+         habitat = "rock and sand") %>% 
+  left_join(taxa_lut) %>% 
+  filter(!is.na(phylum)) %>% 
+  select(ps_station_id, habitat, phylum, taxon, nombre_comun, dacor, dacor_num, is_vme)
+```
+
+```{r}
+rock_and_sand_dacor <- rock_and_sand_04 %>% 
+  bind_rows(rock_and_sand_01_03)%>% 
+  arrange(desc(dacor_num))
+```
+
+```{r}
+rock_and_sand_dacor %>% 
+  group_by(taxon) %>% 
+  summarize(overall_dacor_num = mean(dacor_num)) %>% 
+  mutate(overall_dacor = num_to_dacor(overall_dacor_num))
+```
+
+### Sand
+
+```{r}
+sand_04 <- readxl::read_xlsx("//Volumes/ps-col-exp/data/01_raw/sub/annotations_mayorga.xlsx", 
+                             sheet = "sand") %>% 
+  select(taxon, COL_sub_04 = "dive 4")
+
+sand_dacor <- sand_04 %>% 
+  pivot_longer(cols = -taxon, names_to = "ps_station_id", values_to = "dacor") %>% 
+  filter(!is.na(dacor)) %>% 
+  mutate(dacor_num = dacor_to_num(dacor),
+         habitat = "sand") %>% 
+  left_join(taxa_lut) %>% 
+  filter(!is.na(phylum)) %>% 
+  select(ps_station_id, habitat, phylum, taxon, nombre_comun, dacor, dacor_num, is_vme) %>% 
+  arrange(desc(dacor_num))
+```
+
+```{r}
+sand_dacor %>% 
+  group_by(taxon) %>% 
+  summarize(overall_dacor_num = mean(dacor_num)) %>% 
+  mutate(overall_dacor = num_to_dacor(overall_dacor_num))
+```
+
+# Combine all
+
+
+```{r}
+deepsee_dacor_leg_1 <- bind_rows(sand_dacor,
+                                 rocky_walls_dacor,
+                                 boulders_dacor, 
+                                 hard_bottom_dacor, 
+                                 sand_and_pebbles_dacor,
+                                 rock_and_sand_dacor)
+
+deepsee_dacor_leg_1 %>% 
+  arrange(ps_station_id) %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/col_phase_1/COL_sub_dacor_data.csv")
+```
+
+```{r}
+# deepsee_dacor_leg_1 <- bind_rows(sand_dacor,
+#                                  rocky_walls_dacor,
+#                                  boulders_dacor, 
+#                                  hard_bottom_dacor, 
+#                                  sand_and_pebbles_dacor,
+#                                  rock_and_sand_dacor)
+# 
+# write_csv(deepsee_dacor_leg_1,
+#           "/Volumes/ps-col-exp/data/02_processed/deepsee_dacor_leg1.csv")
+```
+
+```{r}
+deepsee_dacor_leg_1 %>% 
+  ungroup() %>% 
+  group_by(habitat) %>% 
+  summarize(n_taxa = n_distinct(taxon),
+            n_phylum = n_distinct(phylum))
+```
+
+```{r}
+deepsee_dacor_leg_1 %>% 
+  ungroup() %>% 
+  group_by(habitat) %>% 
+  summarize(n_taxa = n_distinct(taxon),
+            n_phylum = n_distinct(phylum))
+```
+
+```{r}
+deepsee_dacor_leg_1 %>% 
+  ungroup() %>% 
+  ggplot()+
+  geom_bar(aes(phylum))+
+  coord_flip()+
+  facet_wrap(~habitat)
+```
+
+
+# niphobles
+
+```{r}
+niphobles_lengths <- readxl::read_xlsx("/Volumes/COL-sub/Hyporthodus_niphobles_lengths.xlsx") 
+  
+mean(niphobles_lengths$size_cm)
+sd(niphobles_lengths$size_cm)
+
+niphobles_lengths %>% 
+mutate(species = "Hyporthodus niphobles") %>% 
+  ggplot()+
+  geom_violin(aes(x = species, y = size_cm))+
+  geom_jitter(aes(x = species, y = size_cm), height = 0, width = 0.1)+
+  labs(x = "", y = "Longitud (cm)", 
+       caption = "Distribución de longitud total de individuos observados en el bajo Navegador. Longitud promedio = 111.0 cm, sd = 33.8 cm")+
+  theme_light()+
+  scico::scale_fill_scico(palette = 'roma', direction = -1) +
+  ggsave("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/niphobles_lengths.png")
+```
+
+

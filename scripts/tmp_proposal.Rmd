@@ -1,0 +1,36 @@
+---
+title: "Process propossed area"
+author: "*Compiled on `r date()` by `r Sys.info()['user']`*"
+output: 
+  html_document:
+    code_folding: show
+    toc: true
+    toc_depth: 1
+    toc_float: yes
+    number_sections: false
+    theme: cerulean
+    highlight: haddock
+---
+
+```{r}
+library(sf)
+library(tidyverse)
+```
+
+```{r}
+cabo <- sf::st_read("../../../Desktop/col-proposal/propuesta_ssf_corrientes.shp")
+
+uac <- sf::st_read("../../../Desktop/col-proposal/uac-pnch/LímiteUAC.shp") %>% 
+  st_transform(crs = st_crs(cabo))
+
+cabo %>% 
+  st_difference(uac) %>% 
+  sf::st_write("../../../Desktop/col-proposal/propuesta_cabo/propuesta_cabo.shp")
+```
+
+```{r}
+sf::st_read("../../../Desktop/col-proposal/propuesta_cabo/propuesta_cabo.shp") %>% sf::st_area()/10^6
+
+```
+
+

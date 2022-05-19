@@ -26,31 +26,35 @@ load(file.path(project_path, "data", "02_processed_data", "admin","common_spatia
 # Chasqui et al
 
 ```{r}
-riscales_raw <- readxl::read_xlsx(file.path(project_path, "data", "01_raw_data","riscales_chasqui.xlsx"))
+riscales_raw <- readxl::read_xlsx(file.path(project_path, 
+                                            "data", "01_raw_data", "riscales_chasqui.xlsx"))
 ```
 
 ```{r}
-riscales_clean <- riscales_raw %>% 
+riscales_chasqui_clean <- riscales_raw %>% 
   janitor::clean_names() %>% 
-  select(nombre,  coordenada, comentarios) %>% 
-  separate(coordenada, 
-           into = c("latitud", "longitud"), sep = ",") %>% 
-  mutate(latitud = parzer::parse_lat(latitud),
-         longitud = parzer::parse_lon(longitud)) 
+  mutate(source = "chasqui") %>% 
+  select(source, name = estaciones,  lon_dec = longitude_dec, lat_dec = latitude_dec) %>% 
+  mutate(lon = measurements::conv_unit(lon_dec,
+                                       from = "dec_deg",
+                                       to = "deg_dec_min"),
+         lat = measurements::conv_unit(lat_dec,
+                                       from = "dec_deg",
+                                       to = "deg_dec_min")) %>% 
+  mutate(lon = stringr::str_trunc(lon, 11, "right", ellipsis = ""),
+         lat = stringr::str_trunc(lat, 11, "right", ellipsis = ""))
+```
 
-riscales_clean_sf <- riscales_clean %>% 
-  sf::st_as_sf(coords = c("longitud", "latitud"), 
+```{r}
+chasqui_sf <- riscales_chasqui_clean %>% 
+  sf::st_as_sf(coords = c("lon_dec", "lat_dec"), 
                crs = 4326) %>% 
   st_transform(crs = col_crs) 
 ```
 
-```{r}
-riscales_clean_sf <- riscales_clean_sf %>% 
-  mutate(mesophotic = if_else(nombre %in% c("La Mina", "Amargal"), T, F))
-```
 
 ```{r}
-riscales_clean_sf <- riscales_clean_sf %>% 
+chasqui_sf <- chasqui_sf %>% 
   st_join(bind_rows(drmi_gtcc["nombre"], 
                     utria["nombre"], 
                     zepa["nombre"],
@@ -58,10 +62,10 @@ riscales_clean_sf <- riscales_clean_sf %>%
             rename(roi = nombre),
           left = T) 
 
-riscales_clean_sf <- riscales_clean_sf %>% 
+chasqui_sf <- chasqui_sf %>% 
   replace_na(list(roi = "golfo de tribuga cabo corrientes")) 
 
-riscales_clean_sf <- riscales_clean_sf %>% 
+chasqui_sf <- chasqui_sf %>% 
   cbind(st_coordinates(.)) %>%
   arrange(desc(Y)) %>%
   select(-X, -Y) %>% 
@@ -69,18 +73,119 @@ riscales_clean_sf <- riscales_clean_sf %>%
 ```
 
 ```{r}
-riscales_clean_sf %>% 
+chasqui_sf %>% 
   group_by(roi) %>% 
   summarize(n_riscales = n())
 ```
 
 ```{r}
-rocky_reefs <- sf::read_sf(file.path(project_path, "/data/01_raw_data/Objetos\ de\ Conservación\ PNCh/FRocosos/Arrecifesrocosos.shp")) %>% 
-  st_transform(col_crs)
-
-plot(rocky_reefs)
+chasqui_sf %>% 
+  sf::st_write(file.path(project_path, "data", "02_processed_data", "riscales_chasqui.gpkg"))
 ```
 
+# Riscales TEK
+
+```{r}
+riscales_tek <- read_csv(file = file.path(project_path, 
+                          "data", "01_raw_data","riscales_tek.csv")) %>% 
+  arrange(desc(lat)) %>% 
+  select(source, name, lon, lat, depth_m, depth_b) 
+
+riscales_tek <- riscales_tek %>% 
+  mutate(lon = paste0("-", lon),
+         lon_dec = as.numeric(measurements::conv_unit(lon,
+                                           from = "deg_dec_min",
+                                           to = "dec_deg")),
+         lat_dec = as.numeric(measurements::conv_unit(lat,
+                                           from = "deg_dec_min",
+                                           to = "dec_deg"))) %>% 
+  mutate_if(is.numeric,round, 4) %>% 
+  select(source, name, lon, lat, lon_dec, lat_dec, depth_m, depth_b)
+
+riscales_tek %>% 
+  sf::st_as_sf(coords = c("lon_dec", "lat_dec"), 
+               crs = 4326) %>% 
+  st_transform(crs = col_crs) %>% 
+  st_write(file.path(project_path, 
+                     "data", "03_output_data", "riscales_tek.gpkg"), append = F)
+```
+
+# Puntos Sandra
+
+```{r}
+pts_sandra <- read_csv(file = file.path(project_path, 
+                          "data", "01_raw_data","puntos_golfo_sandra.csv")) %>% 
+  arrange(desc(lat))
+
+pts_sandra <- pts_sandra %>% 
+  mutate(lon = paste0("-", lon),
+         lon_dec = as.numeric(measurements::conv_unit(lon,
+                                           from = "deg_min_sec",
+                                           to = "dec_deg")),
+         lat_dec = as.numeric(measurements::conv_unit(lat,
+                                           from = "deg_min_sec",
+                                           to = "dec_deg"))) %>% 
+  mutate_if(is.numeric,round, 4) %>% 
+  select(source, name = nombre, lon, lat, lon_dec, lat_dec)
+
+pts_sandra <- pts_sandra %>% 
+  mutate(lon = measurements::conv_unit(lon,
+                                       from = "deg_min_sec",
+                                       to = "deg_dec_min"),
+         lat = measurements::conv_unit(lat,
+                                       from = "deg_min_sec",
+                                       to = "deg_dec_min")) %>% 
+  mutate(lon = stringr::str_trunc(lon, 8, "right", ellipsis = ""),
+         lat = stringr::str_trunc(lat, 8, "right", ellipsis = ""))
+
+pts_sandra %>% 
+  sf::st_as_sf(coords = c("lon_dec", "lat_dec"), 
+               crs = 4326) %>% 
+  st_transform(crs = col_crs) %>% 
+  st_write(file.path(project_path, 
+                     "data", "03_output_data", "pts_sandra.gpkg"), append = F)
+```
+# Turqui
+
+```{r}
+pts_turqui <- read_csv(file = file.path(project_path, "data", "01_raw_data","turqui_pts.csv")) 
+
+pts_turqui <- pts_turqui %>% 
+  rename(depth_m = depth) %>% 
+  mutate(source = "turqui",
+         lon_dec = as.numeric(measurements::conv_unit(lon,
+                                                      from = "deg_dec_min",
+                                                      to = "dec_deg")),
+         lat_dec = as.numeric(measurements::conv_unit(lat,
+                                                      from = "deg_dec_min",
+                                                      to = "dec_deg")))
+
+pts_turqui %>% 
+  sf::st_as_sf(coords = c("lon_dec", "lat_dec"), 
+               crs = 4326) %>% 
+  st_transform(crs = col_crs) %>% 
+  st_write(file.path(project_path, 
+                     "data", "03_output_data", "pts_turqui.gpkg"), append = F)
+```
+
+# Combine them
+
+```{r}
+riscales_coords <- pts_sandra %>% 
+  bind_rows(riscales_tek) %>% 
+  bind_rows(riscales_chasqui_clean) %>% 
+  bind_rows(pts_turqui) %>% 
+  arrange((lat_dec))
+
+riscales_coords %>% 
+  replace_na(list("depth_m" = "", "depth_b" = "")) %>% 
+  write_csv(file.path(project_path, "data", "03_output_data", "riscales_coords.csv"))
+```
+
+```{r}
+rocky_reefs <- sf::read_sf(file.path(project_path, "/data/01_raw_data/Objetos\ de\ Conservación\ PNCh/FRocosos/Arrecifesrocosos.shp")) %>% 
+  st_transform(col_crs)
+```
 
 ```{r}
 col_background_plot+
@@ -122,7 +227,6 @@ riscales_clean_sf %>%
   mutate_at(vars(lon, lat), round, 5) %>% 
   write_csv(file.path(project_path, "data", "03_output_data", "riscales_in_rois.csv"))
 ```
-
 
 ## mapa con mangalres
 
@@ -166,4 +270,91 @@ col_background_plot+
          dpi = 300)
 
 ```
+## INVEMAR/ANH stations
+
+```{r}
+invemar_stations <- read_csv(file.path(project_path, "data", "01_raw_data","estaciones_AUNAP_INVEMAR.csv"))
+
+# change the degree symbol to a space
+invemar_stations$lat = gsub('°', ' ', invemar_stations$lat)
+invemar_stations$lat = gsub(',', '.', invemar_stations$lat)
+
+invemar_stations$lon = gsub('°', ' ', invemar_stations$lon)
+invemar_stations$lon = gsub(',', '.', invemar_stations$lon)
+
+
+# convert from decimal minutes to decimal degrees
+invemar_stations$lat_d = as.numeric(measurements::conv_unit(invemar_stations$lat, from = 'deg_dec_min', to = 'dec_deg'))
+invemar_stations$lon_d = as.numeric(measurements::conv_unit(invemar_stations$lon, from = 'deg_dec_min', to = 'dec_deg'))
+
+invemar_stations %>% 
+  select(aunap_station_id, station_name, lat_d, lon_d) %>% 
+  mutate(lon_d = -1*lon_d) %>% 
+  sf::st_as_sf(coords = c("lon_d", "lat_d"), crs = 4326) %>% 
+  st_transform(crs = st_crs(bajos_eez)) %>% 
+  st_write(file.path(project_path, "data", "02_processed_data", "invemar_anh_stations.gpkg"), append = F)
+
+```
+
+```{r}
+-77.43400,5.65561
+
+measurements::conv_unit(15.8718, from = 'dec_deg', to = 'deg_dec_min')
+```
+
+```{r}
+measurements::conv_unit("77 24.834",  from = 'deg_dec_min', to = 'dec_deg')
+```
+```{r}
+measurements::conv_unit("15 48.195",  from = 'deg_dec_min', to = 'dec_deg')
+
+measurements::conv_unit("78 45.979",  from = 'deg_dec_min', to = 'dec_deg')
+```
+
+
+## Riscales TEK
+
+```{r}
+read_csv(file = file.path(project_path, "data", "03_output_data","riscales_in_rois.csv")) %>% 
+  filter(source == "tek")
+
+
+  arrange(desc(lat)) %>% 
+  rowid_to_column() %>% 
+  select(id = rowid, source, nombre, lon, lat, profundidad_m) %>% 
+  sf::st_as_sf(coords = c("lon", "lat"), 
+               crs = 4326) %>% 
+  st_transform(crs = col_crs) %>% 
+  st_write(file.path(project_path, "data", "03_output_data", "riscales.gpkg"), append = F)
+```
+
+## CC point
+
+```{r}
+tibble("lat" = 217685.506,
+        "lon" = 620530.965) %>% 
+  sf::st_as_sf(coords = c("lon", "lat"), 
+               crs = col_crs) %>% 
+  st_transform(crs = 4326) %>% 
+  dplyr::mutate(lon = sf::st_coordinates(.)[,1],
+                lat = sf::st_coordinates(.)[,2]) %>% 
+  ggplot()+
+  geom_point(aes(lon, lat))+
+  geom_sf(data = drmi_gtcc, fill = "transparent", linetype ="dashed")
+```
+
+
+```{r}
+slopes <- raster("/Volumes/juan ex ssd/COL_bathy_data/sampling grid/Slope/slopetribu100.ovr", 
+                 crs = "+proj=utm +zone=18 +datum=WGS84 +units=m +no_defs")
+
+slopes %>% 
+  projectRaster(tribuga_bati)
+```
+
+
+```{r}
+measurements::conv_unit(x = 80, from = "ft", "m" )
+```
+
 

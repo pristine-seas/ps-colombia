@@ -37,6 +37,11 @@ bq_project <- connection_open(bigquery(),
 
 Here we first upload the ROIs to BQ so we can do spatial queries in BQ
 
+```{r}
+col_pacific_eez %>% 
+  sf::st_write("/Volumes/ps-col-exp/col_pacific_eez.shp")
+```
+
 ```{r, eval = F}
 col_pacific_eez <- st_read(file.path(project_path, 
                                      "data", 
@@ -301,6 +306,16 @@ ggplot()+
          width = 7, height = 4)
 ```
 
+```{r}
+gfw_pacific_presence <- overall_vessel_presence %>% 
+  raster::rasterFromXYZ(crs = 4326) %>% 
+  projectRaster(method = bilinear, crs = crs(malpelo)) 
+
+gfw_pacific_presence[gfw_pacific_presence < 0] <- 0
+
+raster::writeRaster(gfw_pacific_presence,
+               file.path(project_path, "data", "02_processed_data", "gfw_pacific_presence.tif"))
+```
 
 ### Seaflower 
 
@@ -320,6 +335,16 @@ ggplot()+
   geom_sf(data = st_transform(seaflower_br, crs = 4326), 
           linetype = "dashed", size = .25, fill = "transparent")
 ```
+```{r}
+gfw_seaflower_presence <- overall_vessel_presence %>% 
+  raster::rasterFromXYZ(crs = 4326) %>% 
+  projectRaster(method = "bilinear", crs = crs(malpelo)) 
+
+gfw_seaflower_presence[gfw_seaflower_presence < 0] <- 0
+
+raster::writeRaster(gfw_seaflower_presence,
+               file.path(project_path, "data", "02_processed_data", "gfw_seaflower_presence.tif"))
+```
 
 
 ## Map Fishing activity
@@ -327,27 +352,32 @@ ggplot()+
 ### Pacific
 
 ```{r}
+resolution <-  0.01
+
 pacific_ais_fishing <- tbl(bq_project, "ais_positions_pacific") %>% 
   filter(nnet_score > 0) %>% 
   select(ssvid, year, lon, lat, hours) %>% 
   mutate(lat_bin = floor(lat/resolution)*resolution + 0.5*resolution,
          lon_bin = floor(lon/resolution)*resolution + 0.5*resolution) %>% 
-  group_by(lon_bin, lat_bin) %>% 
+  group_by(year, lon_bin, lat_bin) %>% 
   summarize(hours = sum(hours, na.rm = T)) %>% 
   filter(hours > 0) %>% 
   collect()
 
-ggplot()+
-  geom_raster(data = pacific_ais_fishing,
-              aes(lon_bin, lat_bin, fill = hours))+
+#pacific_ais_fishing$year <- as_factor(pacific_ais_fishing$year)
+
+pacific_ais_fishing %>% 
+  filter(year == 2016) %>% 
+  ggplot()+
+  geom_raster(aes(lon_bin, lat_bin, fill = hours))+
   geom_sf(data = st_transform(colombia_pacific_eez, crs = 4326), 
           linetype = "dashed", size = .25, fill = "transparent")+
   geom_sf(data = st_transform(yurupari, crs = 4326), 
           fill = "transparent", col = "lightblue")+
   geom_sf(data = st_transform(malpelo, crs = 4326), 
           fill = "transparent", col = "navy")+
-  geom_sf(data = st_transform(rois_offshore_pacific, crs = 4326),
-          fill = "transparent", col = "gold")+
+  # geom_sf(data = st_transform(rois_offshore_pacific, crs = 4326),
+  #         fill = "transparent", col = "gold")+
   geom_sf(data = st_crop(col_land,
                          colombia_pacific_eez) %>% 
             st_transform(crs = 4326))+
@@ -357,13 +387,87 @@ ggplot()+
         axis.title = element_text(family = "Arial"),
         plot.title.position = "plot",
         panel.background = element_blank())+
-  labs(title = "Fishing activity of vessels with AIS",
-       subtitle = "2016-2020", fill = "Hours",
+  labs(title = "Esfuerzo pesquero de barcos con AIS",
+       subtitle = "2016", fill = "Horas de pesca", caption = "Fuente: Global Fishing Watch",
        x = "", y = "")+
   paletteer::scale_fill_paletteer_c("scico::batlow", trans = "log10")+
-  guides(fill = guide_colorbar(frame.colour = "black", ticks.colour = "black"))+
-  ggsave(filename = file.path(project_path, "figures", "gfw_ais_fishing_pacifico.png"), 
+  guides(fill = guide_colorbar(frame.colour = "black", ticks.colour = "black"))
+  ggsave(filename = "/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/gfw_2016.png",
          dpi = 300, width = 7, height = 4)
+```
+
+```{r}
+effort_by_ssvid <- tbl(bq_project, "ais_positions_pacific") %>% 
+  filter(nnet_score > 0) %>% 
+  group_by(year, ssvid) %>% 
+  summarize(fishing_hours = sum(hours, na.rm = T)) %>% 
+  collect()
+
+effort_summary_by_year <- effort_by_ssvid %>% 
+  filter(year < 2021) %>% 
+  group_by(year) %>% 
+  summarize(n_vessels = n_distinct(ssvid),
+            total_fishing_hours = sum(fishing_hours)) 
+
+effort_summary_by_year %>% 
+  ggplot()+
+  geom_col(aes(x = year, y = n_vessels), fill = "navy")+
+  labs(x = "", y = "Numero de embarcaciones")+
+  theme_light()+
+  ggsave(filename = "/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/gfw_vessels_trend.png",
+         dpi = 300, width = 7, height = 4)
+```
+```{r}
+effort_summary_by_year %>% 
+  ggplot()+
+  geom_col(aes(x = year, y = total_fishing_hours), fill = "orange")+
+  labs(x = "", y = "Esfuerzo pesquero (horas de pesca)")+
+  theme_light()+
+  ggsave(filename = "/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/gfw_effort_trend.png",
+         dpi = 300, width = 7, height = 4)
+```
+
+```{r}
+gfw_pacific_effort <- pacific_ais_fishing %>% 
+  raster::rasterFromXYZ(crs = 4326) %>% 
+  projectRaster(method = "bilinear", crs = crs(malpelo)) 
+
+gfw_pacific_effort[gfw_pacific_effort < 0] <- 0
+
+raster::writeRaster(gfw_pacific_effort,
+               file.path(project_path, "data", "02_processed_data", "gfw_pacific_effort.tif"))
+```
+
+### How much effort inside the proposed expansion
+
+```{r}
+malpelo <- sf::st_read("/Volumes/ps-col-exp/malpelo.gpkg")
+
+malpelo_proposal <- sf::st_read("/Volumes/ps-col-exp/malpelo_proposed/malpelo_proposed.shp", 
+                                crs = st_crs(malpelo))
+```
+
+```{r}
+ais_fishing_sf <- pacific_ais_fishing %>% 
+  sf::st_as_sf(coords = c("lon_bin", "lat_bin"), 
+               crs = 4326) %>% 
+  st_transform(crs = col_crs) 
+
+effort_in_proposal <- ais_fishing_sf %>% 
+  filter(year < 2021) %>% 
+  st_join(malpelo_proposal) %>% 
+  group_by(year) %>% 
+  summarize(total_fishing_hours = sum(hours),
+            percent_in_proposed_area = 100*sum(hours[!is.na(objectid)])/total_fishing_hours) %>% 
+  st_drop_geometry()
+  
+effort_summary_by_year <- effort_in_proposal %>% 
+  left_join(effort_summary_by_year %>% 
+              select(-total_fishing_hours), by = "year")
+
+effort_summary_by_year %>% 
+  mutate_if(is.numeric, round, 2) %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/gfw_effort_summary_by_year.csv")
 ```
 
 ### Seaflower
@@ -481,6 +585,17 @@ sar_detections_seaflower %>%
    ggsave(filename = file.path(project_path, "figures", "gfw_sar_detects_seaflower.png"), 
          dpi = 300)
 ```
+```{r}
+gfw_seaflower_sar <- sar_detections_seaflower %>% 
+  mutate(matched = score > 10^-3) %>% 
+  select(detect_lon, detect_lat, matched) %>% 
+      st_as_sf(coords = c("detect_lon", "detect_lat"),
+           crs = 4326) %>% 
+  st_transform(crs = col_crs) 
+
+sf::st_write(gfw_seaflower_sar,
+             file.path(project_path, "data", "02_processed_data", "gfw_seaflower_sar.gpkg"))
+```
 
 
 ### Pacific
@@ -489,6 +604,17 @@ sar_detections_seaflower %>%
 sar_detections <- tbl(bq_project, "sar_detections_pacific") %>% 
   filter(!is_infrastructure) %>% 
   collect()
+```
+```{r}
+gfw_pacific_sar <- sar_detections %>% 
+  mutate(matched = score > 10^-3) %>% 
+  select(detect_lon, detect_lat, matched) %>% 
+      st_as_sf(coords = c("detect_lon", "detect_lat"),
+           crs = 4326) %>% 
+  st_transform(crs = col_crs) 
+
+sf::st_write(gfw_pacific_sar,
+             file.path(project_path, "data", "02_processed_data", "gfw_pacific_sar.gpkg"))
 ```
 
 ```{r}
@@ -639,4 +765,5 @@ sar_detections_uac %>%
   ggsave(filename = file.path(project_path, "figures", "gfw_sar_qtrly_detects_pnch.png"), 
          dpi = 300)
 ```
+
 

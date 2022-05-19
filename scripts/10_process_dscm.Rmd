@@ -1,0 +1,346 @@
+---
+title: "Process Dropcams"
+author: "*Compiled on `r date()` by `r Sys.info()['user']`*"
+output: 
+  html_document:
+    code_folding: show
+    toc: true
+    toc_depth: 1
+    toc_float: yes
+    number_sections: false
+    theme: cerulean
+    highlight: haddock
+---
+
+```{r}
+library(tidyverse)
+library(ggspatial)
+```
+
+# Read and clean data
+
+```{r}
+dscm_data <- read_csv("/Volumes/ps-col-exp/data/01_raw/dscm/COL_dscm_annotations.csv") %>% 
+  janitor::clean_names()  
+
+dscm_metadata <- read_csv("/Volumes/ps-col-exp/data/01_raw/dscm/COL_dscm_metadata.csv") %>% 
+  janitor::clean_names()
+
+dscm_taxa_list <- read_csv("/Volumes/ps-col-exp/data/01_raw/dscm/taxa_list.csv") %>% 
+  janitor::clean_names()
+```
+
+## clean metadata
+
+```{r}
+dscm_metadata <- dscm_metadata %>% 
+  mutate(date = lubridate::date(lubridate::ymd_hm(mission_start_time_utc_yyyymmddh_hmm))) %>% 
+  select(ps_station_id, 
+         external_station_id = deployment_id_do_not_edit_this_autopopulates_from_the_next_3_columns,
+         date,
+         sublocation = locality,
+         lat = deployment_latitude_ddd_ddddd,
+         lon = deployment_longitude_ddd_ddddd,
+         local_time,
+         max_depth_m,
+         mission_duration = mission_duration_hh_mm)
+
+dscm_metadata <- dscm_metadata %>% 
+  mutate(location = if_else(sublocation == "Navigator seamount", "Yurupari ridge", 
+                            if_else(sublocation %in% c("South Yurupari", "Seamounts east of Malpelo"), "Malpelo ridge", sublocation))) %>% 
+  select(ps_station_id, external_station_id, date, location, sublocation, everything())
+
+
+dscm_metadata$sublocation[dscm_metadata$sublocation == "Seamounts east of Malpelo"] <- "Eastern seamounts"
+dscm_metadata$sublocation[dscm_metadata$sublocation == "Navigator seamount"] <- "Navigator bank"
+
+dscm_metadata %>% 
+  select(ps_station_id, location, sublocation, date, lon, lat,local_time, mission_duration, max_depth_m) %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/col_phase_1/COL_dscm_metadata.csv")
+```
+
+```{r}
+dscm_metadata %>% 
+  select(ps_station_id, location, sublocation, date, lon, lat,local_time, mission_duration, max_depth_m) %>% 
+  filter(location == "Colinas y Lomas") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/Colinas y Lomas/dscm_metadata.csv")
+
+dscm_metadata %>% 
+  select(ps_station_id, location, sublocation, date, lon, lat,local_time, mission_duration, max_depth_m) %>% 
+  filter(location == "Yurupari ridge") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/Yurupari ridge/dscm_metadata.csv")
+
+dscm_metadata %>% 
+  select(ps_station_id, location, sublocation, date, lon, lat,local_time, mission_duration, max_depth_m) %>% 
+  filter(location == "Malpelo ridge") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/Malpelo ridge/dscm_metadata.csv")
+```
+
+## hamonize taxa names
+
+```{r}
+harmonize_taxa <- function(taxa_vect){
+  
+  # make all lower case
+  taxa_vect <- stringr::str_to_lower(taxa_vect)
+  
+  # is it a sp. entry?
+  
+  has_sp <- stringr::str_detect(string = taxa_vect, pattern = "sp")  
+  
+  # is it a sponge?
+  is_sponge <- stringr::str_detect(string = taxa_vect, pattern = c("sponge|spino"))  
+  
+  # which ones need fixing?
+  
+  taxa_to_fix <- taxa_vect[has_sp & !is_sponge & !is.na(taxa_vect)]
+  
+  # harmonize sp. nomenclature
+  
+  fixed_taxa <- taxa_to_fix %>% 
+    str_remove(pattern = "\\.") %>% 
+    str_split(pattern = "sp", simplify = T) %>% 
+    as_tibble() %>% 
+    mutate_all(str_squish) %>% 
+    unite(clean_taxa, V1:V2, sep = " sp. ", na.rm	= F) %>% 
+    unlist(use.names = F) %>% 
+    str_trim()
+  
+  # replace original vector with cleaned vector
+  stopifnot(length(fixed_taxa) == length(which(has_sp & !is_sponge & !is.na(taxa_vect))))
+  
+  taxa_vect[which(has_sp & !is_sponge & !is.na(taxa_vect))] <- fixed_taxa
+  
+  return(taxa_vect)
+  
+}
+```
+
+
+```{r}
+dscm_data <- dscm_data %>% 
+  mutate(clean_taxa = harmonize_taxa(taxa)) 
+```
+
+```{r}
+dscm_data$clean_taxa <- dscm_data$clean_taxa %>% 
+  str_replace_all(c("marocuridae" = "macrouridae",
+                    "aristidae" = "aristeidae",
+                    "ophididae" = "ophidiidae",
+                    "ophiidae" = "ophidiidae"))
+
+dscm_data <- dscm_data %>% 
+  filter(clean_taxa != "arrival at bottom")
+
+dscm_data$max_n <- as.numeric(dscm_data$max_n)
+```
+
+```{r}
+dscm_data %>% 
+  filter(is.na(max_n))
+```
+
+```{r}
+# dscm_data <- dscm_data %>% 
+#   filter(!is.na(max_n))
+```
+
+## join annotations and metadata
+
+```{r}
+dscm_data <- dscm_data %>% 
+  left_join(dscm_metadata %>%
+              select(ps_station_id, location, sublocation, max_depth_m))
+```
+
+# Summary by deployment
+
+```{r}
+total_deployments <- length(unique(dscm_data$ps_station_id))
+
+(deployments_by_location <- dscm_data %>% 
+  group_by(location) %>% 
+  summarise(n_deployments = n_distinct(ps_station_id),
+            min_depth = min(depth_m),
+            max_depth = max(depth_m)))
+```
+
+# Taxa list
+
+```{r}
+dscm_taxa_list %>% 
+  filter(clean_taxa_edit != clean_taxa) %>% 
+  select(clean_taxa, clean_taxa_edit)
+```
+
+```{r}
+dscm_taxa_list <- dscm_taxa_list %>% 
+  select(-sum_max_n) %>% 
+  distinct(clean_taxa_edit, phylum, subphylum_class, order, family) %>% 
+  mutate_if(is.character, stringr::str_to_sentence)
+```
+
+```{r}
+dscm_taxa_list$clean_taxa_edit <- stringr::str_to_lower(dscm_taxa_list$clean_taxa_edit)
+```
+
+```{r}
+dscm_data <- dscm_data %>% 
+  left_join(dscm_taxa_list %>% 
+              select(clean_taxa = clean_taxa_edit, phylum, subphylum_class, order, family), 
+            by = "clean_taxa") 
+
+dscm_data$clean_taxa[dscm_data$clean_taxa %in% c("unidentified invertebrate",
+                                                             "Invertebrata")] <- "Invertebrados sin identificar"
+
+dscm_data %>% 
+  filter(is.na(phylum))
+```
+
+# Summary stats
+
+```{r}
+dscm_data_max_n <- dscm_data %>% 
+  group_by(ps_station_id, location, sublocation, max_depth_m, clean_taxa, phylum, subphylum_class, order, family) %>% 
+  summarize(max_max_n = max(max_n, na.rm = T)) %>% 
+  ungroup() 
+
+dscm_data_max_n %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/col_phase_1/COL_dscm_annotations.csv")
+```
+
+```{r}
+dscm_data_max_n %>% 
+  filter(location == "Yurupari ridge") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/Yurupari ridge/dscm_annotations.csv")
+
+dscm_data_max_n %>% 
+  filter(location == "Malpelo ridge") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/Malpelo ridge/dscm_annotations.csv")
+
+dscm_data_max_n %>% 
+  filter(location == "Colinas y Lomas") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/Colinas y Lomas/dscm_annotations.csv")
+```
+
+
+
+```{r}
+dscm_data_max_n %>% 
+  group_by(location, phylum) %>% 
+  summarize(n_taxa = n_distinct(clean_taxa)) %>% 
+  ungroup() %>% 
+  filter(!is.na(phylum)) %>% 
+  ggplot()+
+  geom_col(aes(x = fct_reorder(phylum, n_taxa),
+               y = n_taxa, 
+               fill = n_taxa),
+           show.legend = F)+
+  coord_flip()+
+  facet_wrap("location")+
+  labs(x = "", y = "Numero de taxones")+
+  theme_light()+
+  scico::scale_fill_scico(palette = 'roma', direction = -1)+
+  ggsave("/Volumes/ps-col-exp/data/02_processed/col_phase_1/COL_dscm_taxa_by_phylum.png")
+```
+
+```{r}
+dscm_data_max_n <- dscm_data %>% 
+  group_by(location, ps_station_id, depth_m, clean_taxa, phylum, subphylum_class, order, family) %>% 
+  summarize(max_max_n = max(max_n, na.rm = T)) %>% 
+  ungroup() 
+
+dscm_data_max_n$clean_taxa[dscm_data_max_n$clean_taxa %in% c("unidentified invertebrate",
+                                                             "Invertebrata")] <- "invertebrados sin identificar"
+
+
+dscm_data_max_n <- dscm_data_max_n %>% 
+  mutate(grouping_variable = if_else(!is.na(family), family,
+                                            if_else(!is.na(order), order, 
+                                                    if_else(!is.na(subphylum_class),subphylum_class,
+                                                            phylum)))) 
+dscm_data_max_n %>% 
+  filter(is.na(grouping_variable)) %>% 
+  mutate(grouping_variable = str_to_title(grouping_variable)) %>% 
+  arrange(grouping_variable) %>% 
+  distinct(grouping_variable)
+
+write_csv(dscm_data_max_n,
+          "/Volumes/ps-col-exp/data/02_processed/dscm_data_max_n_2.csv")
+```
+
+```{r}
+dscm_data_max_n %>% 
+  group_by(location, clean_taxa) %>% 
+  summarize(mean_max_n = mean(max_max_n, na.rm = T),
+            n_obs = n_distinct(ps_station_id)) %>% 
+  left_join(deployments_by_location %>% 
+              select(location, n_deployments)) %>% 
+  mutate(freq_obs = n_obs/n_deployments) %>% 
+  select(-n_obs, -n_deployments) %>% 
+  mutate_if(is.numeric, round, 3) %>% 
+  ungroup() %>% 
+  group_by(location) %>% 
+  arrange(location, desc(freq_obs)) %>% 
+  slice_max(order_by = freq_obs, n = 10)
+```
+
+```{r}
+dscm_data_max_n %>% 
+  group_by(location, clean_taxa) %>% 
+  summarize(mean_max_n = mean(max_max_n, na.rm = T),
+            n_obs = n_distinct(ps_station_id)) %>% 
+  left_join(deployments_by_location %>% 
+              select(location, n_deployments)) %>% 
+  mutate(freq_obs = n_obs/n_deployments) %>% 
+  ungroup() %>% 
+  select(-n_obs, -n_deployments) %>% 
+  mutate_if(is.numeric, round, 3) %>% 
+  arrange(desc(freq_obs)) %>% 
+  slice_max(order_by = freq_obs, n = 20, with_ties = F) %>% 
+  mutate(clean_taxa = str_to_sentence(clean_taxa))
+```
+
+```{r}
+dscm_data_max_n %>% 
+  group_by(ps_station_id, depth_m, location) %>% 
+  summarize(n_taxa = n_distinct(clean_taxa),
+            sum_max_n = sum(max_max_n, na.rm = T)) %>% 
+  filter(sum_max_n > 0) %>% 
+  ggplot()+
+  geom_point(aes(x = (n_taxa), y = -depth_m, col = location))+
+  theme_light()+
+  scale_x_continuous(sec.axis = dup_axis())+
+  theme(axis.line.x.top  = element_line(colour = "red"),
+        axis.line.x.bottom = element_blank(),
+        axis.ticks.x.bottom = element_blank())
+```
+
+```{r}
+dscm_data_max_n %>% 
+  group_by(ps_station_id, depth_m, location) %>% 
+  summarize(n_taxa = n_distinct(clean_taxa),
+            sum_max_n = sum(max_max_n, na.rm = T)) %>% 
+  ggplot()+
+  geom_point(aes(x = n_taxa, y = depth_m, col = location))
+```
+
+# Combine dscm and sub taxa into 1
+
+```{r}
+sub_taxa <- read_csv("/Volumes/ps-col-exp/data/02_processed/col_phase_1/COL_sub_dacor_data.csv") %>% 
+  distinct(taxon, phylum) 
+
+sub_taxa %>% 
+  mutate(taxon = str_to_lower(taxon)) %>% 
+  mutate(sublocation = "Navigator bank") %>% 
+  bind_rows(dscm_data_max_n %>% 
+              rename(taxon = clean_taxa) %>% 
+              distinct(taxon, sublocation, phylum)) %>% 
+  filter(!is.na(phylum)) %>% 
+  group_by(phylum, taxon, sublocation) %>% 
+  summarize(n = n() > 0 ) %>% 
+  pivot_wider(names_from = sublocation, values_from = n) %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/col_phase_1/COL_sub_dscm_taxa_presence_by_region.csv")
+```
+

@@ -1,0 +1,175 @@
+---
+title: "Process YSI meter"
+author: "*Compiled on `r date()` by `r Sys.info()['user']`*"
+output: 
+  html_document:
+    code_folding: show
+    toc: true
+    toc_depth: 1
+    toc_float: yes
+    number_sections: false
+    theme: cerulean
+    highlight: haddock
+---
+
+```{r}
+library(tidyverse)
+library(ggspatial)
+library(lubridate)
+```
+
+# Read and clean data
+
+```{r}
+og_names <- stringr::str_to_lower(c("DATE",	"TIME",	"SITE",	"DATA ID",	"GPS Latitude", "GPS Longitude",	"Barometer (mmHg)",	"pH",	"pH (mV)", "Chlorophyll (RFU)",	"Chlorophyll (µg/L)",	"PE (RFU)",	"PE (ug/L)",	"Cond (µS/cm)",	"Sp Cond (µS/cm)",	"Sal (psu)",	"nLFCond (µS/cm)",	"TDS (mg/L)",	"Temp (∞F)",	"Resistivity (ohms-cm)",	"Sigma-T (s t)", "Sigma (s)", "ODO (% Sat)",	"ODO (mg/L)",	"Pressure (psi a)", "Depth (m)", 	"Vertical Position (m)"))
+
+ysi_data <- list.files("/Volumes/ps-col-exp/data/01_raw/ysi/", 
+                       full.names = T, 
+                       pattern = "COL_ysi") %>% 
+  purrr::map_dfr(.f = read_csv, 
+                 skip = 6, 
+                 col_names = og_names, 
+                 .id = "station_number") %>%
+  janitor::clean_names()
+
+ysi_data$station_number <- as.numeric(ysi_data$station_number)
+
+ysi_data$gps_latitude <- as.numeric(stringr::str_extract(ysi_data$gps_latitude, boundary("word")))
+
+ysi_data$gps_longitude <- as.numeric(stringr::str_extract(ysi_data$gps_longitude, boundary("word")))
+
+ysi_data$date <- lubridate::mdy(ysi_data$date)
+
+station_ids <- tibble(ps_station_id = list.files("/Volumes/ps-col-exp/data/01_raw/ysi/", 
+                                                 full.names = F, 
+                                                 pattern = "COL_ysi") %>% 
+                        str_remove_all("\\.csv") ) %>% 
+  rowid_to_column(var = "station_number")
+
+ysi_data <- ysi_data %>% 
+  left_join(station_ids) %>% 
+  select(ps_station_id, everything())
+```
+
+
+```{r}
+ysi_metadata <- ysi_data %>% 
+  group_by(ps_station_id) %>% 
+  summarize(date = first(date),
+            time = first(time),
+            lon = last(gps_latitude),
+            lat = last(gps_longitude))
+
+ysi_metadata <- ysi_metadata %>% 
+  mutate(sublocation = if_else(date <= ymd("2022-03-06"), "Navigator bank", 
+                               if_else(date == ymd("2022-03-07"), "South Yurupari", 
+                                       if_else(date <= ymd("2022-03-10"), "Eastern seamounts", "Colinas y Lomas")))) 
+```
+
+
+```{r}
+ysi_data %>% 
+  left_join(ysi_metadata %>% 
+              select(ps_station_id, sublocation)) %>% 
+  filter(ps_station_id != "COL_ysi_05", depth_m > 0.5) %>% 
+  group_by(sublocation) %>% 
+  summarize(max_chla = max(chlorophyll_mg_l),
+            mean_chla = mean(chlorophyll_mg_l),
+            sd_chla = sd(chlorophyll_mg_l)) %>% 
+  mutate_if(is.numeric, round, 2) %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/chla_summary.csv")
+```
+```{r}
+ysi_data %>% 
+  left_join(ysi_metadata %>% 
+              select(ps_station_id, sublocation)) %>% 
+  filter(ps_station_id != "COL_ysi_05", depth_m > 0.5, depth_m < 1.5) %>% 
+  group_by(sublocation) %>% 
+  summarize(max_chla = max(chlorophyll_mg_l),
+            mean_chla = mean(chlorophyll_mg_l),
+            sd_chla = sd(chlorophyll_mg_l)) %>% 
+  mutate_if(is.numeric, round, 2) %>% 
+    write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/chla_summary_1m.csv")
+
+```
+
+
+# pH
+
+```{r}
+ysi_data %>% 
+  filter(date > lubridate::mdy("3/1/2022"),
+         depth_m > 1) %>% 
+  group_by(ps_station_id) %>% 
+  arrange(time) %>% 
+  mutate(flag = cumsum(ifelse(depth_m < max(depth_m), 1, NA))) %>% 
+  filter(!is.na(flag)) %>% 
+  ggplot()+
+  geom_line(aes(x = -depth_m, y = ph, col = ps_station_id))+
+  coord_flip()
+```
+# Salinity
+
+```{r}
+ysi_data %>% 
+  filter(date > lubridate::mdy("3/1/2022"),
+         depth_m > 1) %>% 
+  group_by(ps_station_id) %>% 
+  arrange(time) %>% 
+  mutate(flag = cumsum(ifelse(depth_m < max(depth_m), 1, NA))) %>% 
+  filter(!is.na(flag)) %>% 
+  ggplot()+
+  geom_line(aes(x = -depth_m, 
+                y = sal_psu, 
+                col = ps_station_id))+
+  coord_flip()
+```
+# Temperature
+
+```{r}
+ysi_data %>% 
+  filter(date > lubridate::mdy("3/1/2022"),
+         depth_m > 1) %>% 
+  group_by(ps_station_id) %>% 
+  arrange(time) %>% 
+  mutate(flag = cumsum(ifelse(depth_m < max(depth_m), 1, NA))) %>% 
+  filter(!is.na(flag)) %>% 
+  ggplot()+
+  geom_line(aes(x = -depth_m, y = temp_f, 
+                col = ps_station_id))+
+  coord_flip()
+```
+# TAL
+
+```{r}
+ysi_data %>% 
+  filter(date > lubridate::mdy("3/1/2022"),
+         depth_m > 1) %>% 
+  group_by(ps_station_id) %>% 
+  arrange(time) %>% 
+  mutate(flag = cumsum(ifelse(depth_m < max(depth_m), 1, NA))) %>% 
+  filter(!is.na(flag)) %>% 
+  ggplot()+
+  geom_line(aes(x = -depth_m, 
+                y = chlorophyll_mg_l, 
+                col = ps_station_id))+
+  coord_flip()
+```
+# Dissolved oxygen
+
+```{r}
+ysi_data %>% 
+  filter(date > lubridate::mdy("3/1/2022"),
+         depth_m > 1,
+         odo_percent_sat > 5) %>% 
+  group_by(ps_station_id) %>% 
+  arrange(time) %>% 
+  mutate(flag = cumsum(ifelse(depth_m < max(depth_m), 1, NA))) %>% 
+  filter(!is.na(flag)) %>% 
+  ggplot()+
+  geom_line(aes(x = -depth_m, 
+                y =  odo_percent_sat, 
+                col = ps_station_id))+
+  coord_flip()
+```
+

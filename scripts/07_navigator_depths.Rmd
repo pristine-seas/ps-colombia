@@ -1,0 +1,127 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(raster)
+library(tidyverse)
+
+```
+
+# Read spatial mgmt units
+
+```{r}
+load(file.path(project_path, "data", "02_processed_data", "admin","common_spatial_inputs.RData"))
+
+navigator_depths <- readxl::read_xlsx(file.path(project_path, 
+                                                "data", "01_raw_data", "Malpelo SM Points 03 2021.xlsx")) %>% 
+  janitor::clean_names() %>% 
+  rename(c(lon = "w", lat = "n")) 
+
+
+navigator_depths$lat_d = as.numeric(measurements::conv_unit(navigator_depths$lat, from = 'deg_dec_min', to = 'dec_deg'))
+
+navigator_depths$lon_d = as.numeric(measurements::conv_unit(navigator_depths$lon, from = 'deg_dec_min', to = 'dec_deg'))
+
+navigator_depths <- navigator_depths %>% 
+  mutate(depth_m = as.numeric(depth_m)) %>% 
+  dplyr::select(point_number, lon_d, lat_d, depth_m) %>% 
+  mutate(lon_d = -1*lon_d)
+```
+
+```{r}
+navigator_depths <- navigator_depths %>% 
+  na.omit() %>% 
+  arrange(desc(lon_d)) %>% 
+  head(-1) %>%  
+  mutate(first_site = if_else(point_number == "089", T, F))
+  
+ggplot(navigator_depths,
+       aes(lon_d, 
+           lat_d,
+           shape = first_site, 
+           col = depth_m))+
+  geom_point()
+```
+
+```{r}
+ggplot(data=navigator_depths,
+       aes(lon_d, 
+           lat_d,
+           z = depth_m))+
+  geom_point(aes(colour=depth_m))+
+  stat_density2d()
+```
+
+```{r}
+navigator_depths_sf <- navigator_depths %>% 
+  sf::st_as_sf(coords = c("lon_d", "lat_d"), 
+               crs = 4326) %>% 
+  sf::st_transform(crs = col_crs) 
+
+navigator_depths_sf %>% 
+  sf::st_write(file.path(project_path, "data", "02_processed_data", "argo_navigator_depths.gpkg"))
+
+navigator_depths_sf %>% 
+  filter(point_number == "089") %>% 
+  sf::st_write(file.path(project_path, "data", "02_processed_data", "argo_navigator_start.gpkg"))
+```
+
+```{r}
+#Tribuga crs 32618
+#Bajo Nuevo crs 32717
+
+stars::read_stars()
+
+
+tribuga_bati <- read.table("/Users/juanmayorga/Downloads/Batimetrias-IslaCayos_Tribuga/Tribuga_Pacifico.xyz",
+                           header = F, 
+                           dec =".") %>% 
+   sf::st_as_sf(coords = c("V1", "V2"), 
+                 crs = 32618) %>% 
+  stars::st_rasterize() 
+
+plot(tribuga_bati)
+
+stars::write_stars(tribuga_bati, 
+                  "tribuga_bathy.tif")
+```
+
+```{r}
+terra::rast("tribuga_bathy.tif") %>% 
+  terra::writeRaster(filename = "tribuga_bathymetry_v2.tif")
+```
+
+
+### Tribuga high res
+
+```{r}
+tribuga_bati <- read.table("/Volumes/ps-col-exp/batimetria/Tribuga.xyz",
+                           header = F, 
+                           dec =".") %>% 
+  sf::st_as_sf(coords = c("V1", "V2"), 
+                 crs = 32618) %>% 
+  stars::st_rasterize() 
+
+plot(tribuga_bati)
+
+stars::write_stars(tribuga_bati, 
+                  "tribuga_bathy_100m.tif")
+```
+
+```{r}
+tribuga_bati <- raster("tribuga_bathy_high_res.tif")
+
+plot(tribuga_bati)
+
+tribuga_interpolated <- raster::focal(tribuga_bati, w = matrix(1, nrow = 5, ncol = 5), fun=mean, NAonly = T, na.rm = T)
+
+plot(tribuga_interpolated)
+
+tribuga_interpolated <- tribuga_interpolated*-1
+
+writeRaster(tribuga_interpolated, 
+            "tribuga_bathy_high_res_int.tif")
+```
+

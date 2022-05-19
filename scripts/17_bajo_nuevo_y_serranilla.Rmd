@@ -1,0 +1,85 @@
+---
+title: "Bajo Nuevo y Serranilla"
+author: "*Compiled on `r date()` by `r Sys.info()['user']`*"
+output: 
+  html_document:
+    code_folding: show
+    toc: true
+    toc_depth: 1
+    toc_float: yes
+    number_sections: false
+    theme: cerulean
+    highlight: haddock
+---
+
+```{r}
+library(tidyverse)
+library(ggspatial)
+library(stringr)
+library(lubridate)
+library(raster)
+library(sf)
+```
+
+```{r}
+bn_raster <- raster("/Volumes/ps-col-exp/batimetria/Phase 3/BajoNuevo.tif")
+
+ser_raster <- rgdal::ogrListLayers("../../../Desktop/Serranilla.gdb/")
+
+plot(ser_raster)
+
+values(ser_raster)
+```
+
+```{r}
+allen_data_bathy <- raster::raster(file.path(project_path, 
+                                             "data", "01_raw_data", "ps-caribe-20211005224018","Bathymetry---composite-depth", "bathymetry_0.tif")) 
+
+
+
+bajos_eez <- sf::st_read(file.path(project_path, 
+                                   "data", "02_processed_data", "admin","bajos_eez.shp")) %>% 
+  sf::st_transform(crs = st_crs(bn_raster))
+
+allen_data_bathy <- allen_data_bathy %>% 
+  projectRaster(crs = "+proj=utm +zone=17 +datum=WGS84 +units=m +no_defs")
+```
+
+```{r}
+allen_data_bathy_serranilla <- allen_data_bathy %>% 
+  mask(bajos_eez[1,])
+
+allen_data_bathy_bajo_nuevo<- allen_data_bathy %>% 
+  mask(bajos_eez[2,])
+
+plot(allen_data_bathy_bajo_nuevo)
+```
+
+
+```{r}
+sum(allen_data_bathy_bajo_nuevo[] <= 200, na.rm = T)/sum(allen_data_bathy_bajo_nuevo[] > 0, na.rm = T)
+
+
+allen_data_bathy_bajo_nuevo
+```
+
+```{r}
+bn_raster[is.na(bn_raster)] <- 0
+
+bn_raster %>% 
+  mask(bajos_eez) %>% 
+  plot()
+```
+
+```{r}
+sum(bn_raster[] >= -200)/sum(bn_raster[] <= 0)
+
+sum(bn_raster[] >= -200)/sum(bn_raster[] <= 0)
+```
+
+```{r}
+bajos_eez %>% sf::st_area()/10^6
+```
+
+
+

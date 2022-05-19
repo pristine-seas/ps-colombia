@@ -1,0 +1,139 @@
+---
+title: "Process pelagics"
+author: "*Compiled on `r date()` by `r Sys.info()['user']`*"
+output: 
+  html_document:
+    code_folding: show
+    toc: true
+    toc_depth: 1
+    toc_float: yes
+    number_sections: false
+    theme: cerulean
+    highlight: haddock
+---
+
+```{r}
+library(tidyverse)
+library(ggspatial)
+library(stringr)
+```
+
+
+```{r}
+pcam_data <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/pcam/Colombia_2022_Pelagic_Fieldsheet_2022_03_17.xlsx") %>% 
+  janitor::clean_names() 
+
+pcam_data$location[pcam_data$location == "Yurupari"] <- "Yurupari ridge"
+pcam_data$location[pcam_data$location == "Malpelo Ridge"] <- "Malpelo ridge"
+pcam_data$sublocation[pcam_data$sublocation == "East"] <- "Eastern seamounts"
+
+pcam_taxa <- read_csv("/Volumes/ps-col-exp/data/01_raw/pcam/pcam_taxa_clean_ct.csv") %>% 
+  janitor::clean_names() 
+
+pcam_obs <- pcam_data %>% 
+  select(ps_station_id, location) %>% 
+  bind_cols(pcam_data$species_for_summary_report %>% 
+  str_split(pattern = ",", simplify = T) %>% 
+  as_tibble()) %>% 
+  pivot_longer(cols = -c(ps_station_id, location)) %>% 
+  mutate(value = ifelse(value == "", NA, value)) %>% 
+  filter(!is.na(value)) 
+
+pcam_obs_numbers <- pcam_obs %>% 
+  pull(value) %>% 
+  str_remove_all("[A-z]+") %>% 
+  str_remove_all("\\.") %>% 
+  str_remove_all("\\?") %>% 
+  str_remove_all(" ") %>% 
+  str_replace_all(pattern = "\\~", replacement = "-") %>% 
+  str_squish() %>% 
+  str_trim() %>% 
+  str_split(pattern = "-", simplify = T) %>% 
+  as_tibble() %>% 
+  set_names(c("min_n", "max_n")) 
+
+p_cam_taxa <- pcam_obs %>% 
+  pull(value) %>% 
+  str_extract_all("[A-z]+", simplify = T) %>% 
+  as_tibble() %>% 
+  unite(clean_taxa, V1:V2, sep = " ", na.rm	= F) %>% 
+  mutate(clean_taxa = str_to_lower(str_trim(str_squish(clean_taxa))))
+```
+
+```{r}
+pcam_obs_clean <- pcam_obs %>% 
+  select(ps_station_id, location) %>% 
+  bind_cols(p_cam_taxa) %>% 
+  bind_cols(pcam_obs_numbers) %>% 
+  mutate(min_n = as.numeric(min_n),
+         max_n = as.numeric(max_n))
+```
+
+```{r}
+pcam_obs_clean <- pcam_obs_clean %>% 
+  filter(!is.na(min_n)) %>% 
+  mutate(max_n = if_else(is.na(max_n), min_n, max_n))
+
+pcam_obs_clean <- pcam_obs_clean %>% 
+  left_join(pcam_taxa) %>% 
+  mutate(spanish_name = str_to_lower(spanish_name)) %>% 
+  select(ps_station_id, location, clean_taxa, common_name, spanish_name, genus, family, min_n, max_n) 
+  
+pcam_obs_clean %>% 
+write_csv("/Volumes/ps-col-exp/data/02_processed/col_phase_1/COL_pcam_data_clean.csv")
+```
+
+```{r}
+unique(pcam_obs_clean$location)
+```
+
+```{r}
+pcam_obs_clean %>%
+  filter(location == "Malpelo ridge") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/Malpelo Ridge/pcam_annotations.csv")
+
+pcam_obs_clean %>%
+  filter(location == "Colinas y Lomas") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/Colinas y Lomas/pcam_annotations.csv")
+
+pcam_obs_clean %>%
+  filter(location == "Yurupari ridge") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/Yurupari ridge/pcam_annotations.csv")
+```
+
+```{r}
+library(lubridate)
+
+pcam_data <- pcam_data %>% 
+  group_by(ps_station_id, location, date) %>% 
+  summarize(lat = first(lat_in),
+            lon = first(long_out)) %>% 
+  mutate(sublocation = if_else(date <= ymd("2022-03-06"), "Navigator bank", 
+                               if_else(date == ymd("2022-03-07"), "South Yurupari", 
+                                       if_else(date <= ymd("2022-03-10"), "Eastern seamounts", "Colinas y Lomas")))) %>% 
+  select(ps_station_id, location, sublocation, everything()) 
+
+  
+pcam_data %>% write_csv("/Volumes/ps-col-exp/data/02_processed/col_phase_1/COL_pcam_metadata.csv")
+```
+
+```{r}
+pcam_data %>% 
+  filter(location == "Colinas y Lomas") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/Colinas y Lomas/pcam_metadata.csv")
+
+pcam_data %>% 
+  filter(location == "Malpelo ridge") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/Malpelo ridge/pcam_metadata.csv")
+
+pcam_data %>% 
+  filter(location == "Yurupari ridge") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/Yurupari ridge/pcam_metadata.csv")
+```
+
+```{r}
+pcam_taxa %>% 
+  select(spanish_name, taxa = clean_taxa, genus, family) %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/col_phase_1/COL_pcam_taxa_list.csv")
+```
+

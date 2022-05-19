@@ -1,0 +1,218 @@
+---
+title: "Summary of work"
+output: html_notebook
+---
+
+```{r}
+library(sf)
+library(tidyverse)
+library(ggspatial)
+library(lubridate)
+```
+
+```{r}
+trip_sections <- tribble(~leg, ~location, ~sublocation, ~start_date, ~end_date,
+        "Offshore Pacific", "Yurupari ridge", "Navigator bank", "2022-03-03", "2022-03-06",
+        "Offshore Pacific", "Malpelo ridge", "Southwest seamounts", "2022-03-07", "2022-03-08",
+        "Offshore Pacific", "Malpelo ridge", "East seamounts", "2022-03-09", "2022-03-10",
+        "Offshore Pacific", "Colinas y lomas", "Box 1", "2022-03-11", "2022-03-11",
+        "Offshore Pacific", "Colinas y lomas", "Box 2", "2022-03-12", "2022-03-12",
+        "Offshore Pacific", "Colinas y lomas", "Box 3", "2022-03-13", "2022-03-13",
+        "Offshore Pacific", "Colinas y lomas", "Box 4", "2022-03-14", "2022-03-14",
+        "Golfo de Tribuga", "Golfo de Tribuga", "Golfo de Tribuga", "2022-03-16", "2022-03-29",
+        "Caribe", "Seaflower", "Bajo Nuevo", "2022-04-09", "2022-04-14",
+        "Caribe", "Seaflower", "Serranilla", "2022-04-05", "2022-04-19")
+```
+
+# Dropcams
+
+```{r}
+dscm_metadata <- read_csv("/Volumes/ps-col-exp/data/01_raw/dscm/DSC_Colombia_2022_DEPLOYMENT LOG.csv", 
+                          trim_ws = T, skip_empty_rows = T) %>% 
+  janitor::clean_names() %>% 
+  filter(!is.na(ps_station_id))
+
+dscm_metadata <- dscm_metadata %>% 
+  mutate(date = lubridate::date(lubridate::ymd_hm(mission_start_time_utc_yyyymmddh_hmm))) %>% 
+  select(ps_station_id, 
+         external_station_id = deployment_id_do_not_edit_this_autopopulates_from_the_next_3_columns,
+         date,
+         sublocation = locality,
+         lat = deployment_latitude_ddd_ddddd,
+         lon = deployment_longitude_ddd_ddddd,
+         local_time,
+         max_depth_m,
+         mission_duration = mission_duration_hh_mm)
+
+dscm_metadata$lat <- as.numeric(dscm_metadata$lat)
+```
+
+```{r}
+dscm_metadata %>% 
+  mutate(leg = if_else(date < lubridate::ymd("2022-03-15"), "Leg 1", 
+                       if_else(date < lubridate::ymd("2022-03-30"), "Leg 2", "Leg 3"))) %>% 
+  group_by(leg) %>% 
+  summarize(n_deployment = n_distinct(ps_station_id),
+            hours = as.numeric(measurements::conv_unit(sum(mission_duration),
+                                                       from = 'sec', 
+                                                       to = 'hr')),
+            min_depth = min(max_depth_m),
+            max_depth = max(max_depth_m))
+```
+
+
+```{r}
+dscm_metadata %>% 
+  select(ps_station_id, date, lat, lon, local_time, max_depth_m, mission_duration) %>% 
+  sf::st_as_sf(coords = c("lon", "lat"), 
+               crs = 4326) %>% 
+  sf::st_write("/Volumes/NO NAME/pristine_seas_shp/dropcams.shp")
+```
+
+
+# Pelagic cams
+
+```{r}
+pcam_metadata <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/pcam/Colombia_2022_Pelagic_Fieldsheet_2022_04_18.xlsx", 
+                          trim_ws = T) %>% 
+  janitor::clean_names() %>% 
+  filter(!is.na(ps_station_id))
+
+pcam_metadata %>% 
+  select(ps_station_id, date, location, time_in, time_out) %>% 
+  mutate(leg = if_else(date < lubridate::ymd("2022-03-15"), "Leg 1", 
+                       if_else(date < lubridate::ymd("2022-03-30"), "Leg 2", "Leg 3"))) %>% 
+  group_by(leg) %>% 
+  summarise(n_deployment = n_distinct(ps_station_id),
+            hours = sum(duration_hr, na.rm = T))
+```
+
+
+```{r}
+n_distinct(pcam_metadata$date)
+```
+
+```{r}
+pcam_metadata %>% 
+  mutate(duration_hr = lubridate::int_length(lubridate::interval(start = time_in, 
+                                                                 end = time_out))/3600) %>% 
+  select(ps_station_id, date, lat = lat_in, lon = long_in, duration_hr) %>% 
+  filter(!is.na(lat)) %>% 
+  sf::st_as_sf(coords = c("lon", "lat"), 
+               crs = 4326) %>% 
+  sf::st_write("/Volumes/NO NAME/pristine_seas_shp/pelagicams.shp")
+```
+
+# SUB
+ 
+```{r}
+sub_meta <- readxl::read_xlsx("/Volumes/COL-sub/_COL_sub_metadata.xlsx") %>% 
+  janitor::clean_names()
+
+sub_meta <- sub_meta %>% 
+  mutate(leg = if_else(date < lubridate::ymd("2022-03-15"), "Leg 1", 
+                       if_else(date < lubridate::ymd("2022-03-30"), "Leg 2", 
+                               "Leg 3")),
+         duration = resurface - dive_start) 
+  
+sub_meta %>% 
+  group_by(leg) %>% 
+  summarise(n_deployment = n_distinct(ps_station_id),
+            hours = sum(duration),
+            min_depth = min(max_depth),
+            max_depth = max(max_depth))
+```
+```{r}
+sub_meta$start_lat <- sub_meta$gps_bottom_start %>%
+  str_split("N", simplify = T) %>% 
+  as_tibble() %>% 
+  select(lat = V1) %>% 
+  pull(lat) %>% 
+  str_squish() %>% 
+  str_replace("\\'", " ") %>% 
+  measurements::conv_unit(from = 'deg_dec_min', to = 'dec_deg') %>% 
+  as.numeric() %>% 
+  round(4)
+  
+sub_meta$start_lon <- sub_meta$gps_bottom_start %>%
+  str_split("N", simplify = T) %>% 
+  as_tibble() %>% 
+  select(lon = V2) %>% 
+  pull(lon) %>% 
+  str_replace("\\'", " ") %>% 
+  str_replace("W", "") %>% 
+  str_squish() %>% 
+  measurements::conv_unit(from = 'deg_dec_min', to = 'dec_deg') %>% 
+  as.numeric() %>% 
+  round(4)*-1
+```
+
+```{r}
+sub_meta %>% 
+  select(ps_station_id, date, max_depth, lat = start_lat, lon = start_lon, duration)  %>% 
+  sf::st_as_sf(coords = c("lon", "lat"), 
+               crs = 4326) %>% 
+  sf::st_write("/Volumes/NO NAME/pristine_seas_shp/sub.shp", append = F)
+```
+
+# DIVES
+
+```{r}
+tribuga_dives <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/fish/tribuga_fish_metadata.xlsx") %>% 
+  janitor::clean_names()
+
+seaflower_dives <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/fish/SEA_fish_metadata.xlsx") %>% 
+  janitor::clean_names()
+
+sci_dives <- tribuga_dives %>% 
+  bind_rows(seaflower_dives) 
+
+sci_dives %>% 
+  janitor::clean_names() %>% 
+  mutate(leg = if_else(date < lubridate::ymd("2022-03-15"), "Leg 1", 
+                       if_else(date < lubridate::ymd("2022-03-30"), "Leg 2", "Leg 3"))) %>% 
+  group_by(leg) %>% 
+  summarize(n_distinct(ps_station_id))
+
+sci_dives %>% 
+  select(ps_station_id, date, lat, lon, habitat)  %>% 
+  sf::st_as_sf(coords = c("lon", "lat"), 
+               crs = 4326) %>% 
+  sf::st_write("/Volumes/NO NAME/pristine_seas_shp/science_dives.shp", append = F)
+```
+
+# Tags
+
+```{r}
+readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/Pristine_Seas_Data_2022/Drumline_Data.xlsx") %>% 
+  janitor::clean_names() %>% 
+  filter(set_check_number == "Set", !is.na(latitude)) %>% 
+  select(date, lat = latitude, lon = longitud) %>% 
+  sf::st_as_sf(coords = c("lon", "lat"), 
+               crs = 4326) %>% 
+  sf::st_write("/Volumes/ps-col-exp/pristine_seas_shp/tagging.shp", append = F)
+```
+
+# BRUVS
+
+```{r}
+readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/Pristine_Seas_Data_2022/bulk_upload_BajoNuevo_BRUVs.xlsx") %>% 
+  janitor::clean_names() %>% 
+  sf::st_as_sf(coords = c("longitude", "latitude"), 
+               crs = 4326) %>% 
+  sf::st_write("/Volumes/ps-col-exp/pristine_seas_shp/shallow_bruvs.shp", append = F)
+```
+
+# Meso
+
+```{r}
+readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/edna/eDNA_Meso_Metadata_Colombia.xlsx", 
+                  sheet = "Meso") %>% 
+  janitor::clean_names() %>% 
+  select(ps_station_id = sample, date, lat, lon, depth) %>% 
+  filter(!is.na(lat)) %>% 
+  sf::st_as_sf(coords = c("lon", "lat"), 
+               crs = 4326) %>% 
+  sf::st_write("/Volumes/ps-col-exp/pristine_seas_shp/meso_bruvs.shp", append = F)
+```
+

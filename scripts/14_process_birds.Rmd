@@ -1,0 +1,150 @@
+---
+title: "Process birds"
+author: "*Compiled on `r date()` by `r Sys.info()['user']`*"
+output: 
+  html_document:
+    code_folding: show
+    toc: true
+    toc_depth: 1
+    toc_float: yes
+    number_sections: false
+    theme: cerulean
+    highlight: haddock
+---
+
+```{r}
+library(tidyverse)
+library(ggspatial)
+library(stringr)
+library(lubridate)
+```
+
+```{r}
+birds_log <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/birds/Colombia_Seabirds_Fieldsheet_2022_03_16.xlsx",
+                               sheet = "Log")
+
+birds_transect <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/birds/Colombia_Seabirds_Fieldsheet_2022_03_16.xlsx",
+                               sheet = "Transect meta") %>% 
+  janitor::clean_names()
+
+birds_taxa_list <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/birds/Colombia_Seabirds_Fieldsheet_2022_03_16.xlsx",
+                               sheet = "Species") %>% 
+  janitor::clean_names()
+
+birds_transect <- birds_transect %>% 
+  mutate(location = if_else(sublocation %in% c("Southern Seamounts", "East"), 
+                            "Malpelo Ridge", location))
+```
+
+```{r}
+birds_transect$location[birds_transect$location == "Yurupari"] <- "Yurupari ridge"
+birds_transect$sublocation[birds_transect$sublocation == "Navigator Seamount"] <- "Navigator bank"
+birds_transect$location[birds_transect$location == "Malpelo Ridge"] <- "Malpelo ridge"
+birds_transect$sublocation[birds_transect$sublocation == "East"] <- "Eastern seamounts"
+birds_transect$sublocation[birds_transect$location == "Colinas y Lomas"] <- "Colinas y Lomas"
+
+```
+
+# metadata
+
+```{r}
+birds_transect_meta <- birds_transect %>% 
+    select(ps_station_id, location, sublocation, date, time_start, time_stop, lat_start, long_start)
+
+birds_transect_meta$start_time <- birds_transect_meta$time_start %>% 
+  stringr::str_split(" ", simplify = T ) %>% 
+  as_tibble() %>% 
+  select(time = V2) %>% 
+  pull()
+
+birds_transect_meta$stop_time <- birds_transect_meta$time_stop %>% 
+  stringr::str_split(" ", simplify = T ) %>% 
+  as_tibble() %>% 
+  select(time = V2) %>% 
+  pull()
+
+birds_transect_meta %>% 
+  select(-time_start, -time_stop) %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/col_phase_1/COL_birds_metadata.csv")
+```
+```{r}
+birds_transect_meta %>% 
+  select(-time_start, -time_stop) %>% 
+  filter(location == "Yurupari ridge") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/Yurupari ridge/birds_metadata.csv")
+
+birds_transect_meta %>% 
+  select(-time_start, -time_stop) %>% 
+  filter(location == "Malpelo ridge") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/Malpelo ridge/birds_metadata.csv")
+
+birds_transect_meta %>% 
+  select(-time_start, -time_stop) %>% 
+  filter(location == "Colinas y Lomas") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/Colinas y Lomas/birds_metadata.csv")
+```
+
+
+```{r}
+birds_transect <- birds_transect %>% 
+  select(ps_station_id, location,  15:ncol(birds_transect)) %>% 
+  pivot_longer(cols = -c("location", "ps_station_id"), 
+               names_to = "taxa", values_to = "n") %>% 
+  filter(n > 0) 
+
+birds_summary_by_location <- birds_transect %>% 
+  group_by(location) %>% 
+  summarize(n_transects = n_distinct(ps_station_id),
+            n_taxa = n_distinct(taxa))
+```
+
+```{r}
+birds_taxa_list <- birds_taxa_list %>% 
+  mutate(taxa = stringr::str_to_lower(taxa) ,
+         taxa = stringr::str_squish(stringr::str_replace_all(taxa, "-", " ")))
+
+birds_taxa_list %>% 
+  select(spanish_common_name, scientific_name = binomial, sub_species, iucn) %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/col_phase_1/COL_birds_taxa_list.csv")
+
+birds_transect <- birds_transect %>% 
+  mutate(taxa = str_replace_all(taxa, "_", " ")) %>% 
+  left_join(birds_taxa_list, by = "taxa")
+
+birds_transect <- birds_transect %>% 
+  select(ps_station_id, location, spanish_common_name, n_individuals = n ,scientific_name = binomial, sub_species, iucn) 
+  
+write_csv(birds_transect, "/Volumes/ps-col-exp/data/02_processed/col_phase_1/COL_birds_transects_data.csv")
+```
+```{r}
+birds_transect %>% 
+  filter(location == "Yurupari ridge") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/Yurupari ridge/birds_annnotations.csv")
+
+birds_transect %>% 
+  filter(location == "Malpelo ridge") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/Malpelo ridge/birds_annnotations.csv")
+
+birds_transect %>% 
+  filter(location == "Colinas y Lomas") %>% 
+  write_csv("/Volumes/ps-col-exp/data/02_processed/clean_data_pacifico/Colinas y Lomas/birds_annnotations.csv")
+```
+
+
+```{r}
+birds_summary_stat <- birds_transect %>% 
+  group_by(location, taxa) %>% 
+  summarise(n_obs = n_distinct(ps_station_id),
+            max_n = max(n)) %>% 
+  left_join(birds_summary_by_location) %>% 
+  mutate(freq_obs = n_obs/n_transects) %>% 
+  arrange(location, desc(freq_obs)) %>% 
+  mutate_if(is_numeric, round, 2) %>% 
+  select(location, taxa, freq_obs, max_n) %>% 
+  ungroup() %>% 
+  mutate(taxa = stringr::str_trim(stringr::str_squish(stringr::str_replace_all(taxa, 
+                                                                               "_", " "))))
+```
+
+
+

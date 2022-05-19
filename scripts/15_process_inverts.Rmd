@@ -1,0 +1,72 @@
+---
+title: "Proceees inverts"
+author: "*Compiled on `r date()` by `r Sys.info()['user']`*"
+output: 
+  html_document:
+    code_folding: show
+    toc: true
+    toc_depth: 1
+    toc_float: yes
+    number_sections: false
+    theme: cerulean
+    highlight: haddock
+---
+
+```{r}
+library(tidyverse)
+library(ggspatial)
+library(stringr)
+library(lubridate)
+```
+
+
+```{r}
+fish_metadata <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/fish/tribuga_fish_data_final.xlsx") %>% 
+  distinct(ps_station_id, depth_m)
+
+pacific_metadata <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/inverts/COL_contacts_fieldsheet.xlsx",
+                                        sheet = "metadata") %>% 
+  janitor::clean_names()
+
+pacific_collection <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/inverts/COL_contacts_fieldsheet.xlsx",
+                                        sheet = "collections") %>% 
+  janitor::clean_names()
+
+caribe_collection <- readxl::read_xlsx("/Volumes/ps-col-exp/data/01_raw/inverts/SEA_contacts_fieldsheet_definitivo.xlsx",
+                                       sheet = "Collections") %>% 
+  janitor::clean_names()
+```
+
+```{r}
+pacific_metadata <- pacific_metadata %>% 
+  left_join(fish_metadata %>% 
+              group_by(ps_station_id) %>% 
+              summarize(depth_m = min(depth_m)),
+            by = c("paired_station_id" = "ps_station_id"))
+```
+
+```{r}
+caribe_collection <- caribe_collection %>% 
+  select(sample_number = ref_kike, tentative_taxa, habitat, preservation_method, location = loc)
+
+pacific_collection <- pacific_collection %>% 
+  mutate(location = "Golfo de Tribuga") %>% 
+    select(sample_number, ps_station_id, tentative_taxa, habitat, preservation_method, location)
+
+algae_collections <- bind_rows(pacific_collection, caribe_collection) %>% 
+  mutate(habitat = str_to_lower(habitat),
+         ps_station_id = str_replace(ps_station_id, "ps", "COL"))
+```
+
+
+
+```{r}
+algae_collections %>% 
+  left_join(pacific_metadata %>% 
+              select(ps_station_id, local_time, date_ddmmyy, lat, lon, depth_m)) %>% 
+  select(sample_number, tentative_taxa, location, date = date_ddmmyy, local_time, habitat, lat, lon, depth_m, preservation_method)  %>% 
+  mutate(date = lubridate::ymd(date),
+         local_time = format(local_time,  format = "%H:%M:%S")) %>% 
+  write_csv(file = "../../../Desktop/ps_COL_algae_collection_metadata.csv")
+```
+

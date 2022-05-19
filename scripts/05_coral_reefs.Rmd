@@ -27,7 +27,7 @@ load(file.path(project_path, "data", "02_processed_data", "admin","common_spatia
 
 # Pacific
 
-Coral reefs are rare in the Pacific Coast. A couple patches of red coral exist inside PNN Utria
+Coral reefs are rare in the Pacific Coast. A couple patches of  coral exist inside PNN Utria
 
 ```{r}
 corales_pnch <- read_sf(file.path(project_path, "data", "01_raw_data", "Objetos de Conservación PNCh", "Corales", "Coral.shp")) %>% 
@@ -88,8 +88,7 @@ estaciones_bajos <- estaciones_bajos %>%
 estaciones_bajos <- estaciones_bajos %>% 
   st_join(bajos_eez %>% select(territory1), left = T) %>% 
   rename(roi = territory1) %>% 
-  replace_na(list(roi = "Bajo Alicia")) %>% 
-  select(-title)
+  replace_na(list(roi = "Bajo Alicia")) 
 
 estaciones_bajos %>% 
   st_transform(crs = 4326) %>% 
@@ -99,6 +98,11 @@ estaciones_bajos %>%
   st_drop_geometry() %>% 
   mutate_at(vars(lon, lat), round, 5) %>% 
   write_csv(file.path(project_path, "data", "03_output_data", "stations_caribe_rois.csv"))
+```
+
+```{r}
+estaciones_bajos %>% 
+  st_write(file.path(project_path, "data", "02_processed_data", "estaciones_bajos.gpkg"))
 ```
 
 ```{r}
@@ -265,7 +269,21 @@ col_background_plot +
          dpi = 300, width = 7, height = 5 )
 ```
 
-## Bathymetry
+# AGGRA stations
+
+```{r}
+aggra_stations <- read_csv(file.path(project_path, "data", "01_raw_data", "AGRRA_stations_seaflower.csv"))
+
+aggra_stations <- aggra_stations %>% 
+  sf::st_as_sf(coords = c("Lon", "Lat N"), crs = 4326) %>% 
+  st_transform(crs = st_crs(bajos_eez))
+
+
+aggra_stations %>% 
+  st_write(file.path(project_path, "data", "02_processed_data", "aggra_stations.gpkg"))
+```
+
+# Bathymetry
 
 ```{r}
 library(rasterVis)
@@ -283,6 +301,48 @@ bathy_plot <- rasterVis::levelplot(allen_data_bathy, margin = F, main = "Bathyme
 pdf(file.path(project_path, "figures", "bajos_bathymetry.pdf"))
 print(bathy_plot)
 dev.off()
+```
+
+# Tentative sub and dropcam positions
+```{r}
+library(rgdal)
+
+gdb_pth <- "/Volumes/ps-col-exp/batimetria/Phase 3/PlanFase3PristineSeas2022.gdb"
+
+fc_list <- rgdal::ogrListLayers("../../../Desktop/PlanFase3PristineSeas2022.gdb")
+```
+
+
+```{r}
+deep_see_pts <- sf::st_read(dsn = "../../../Desktop/PlanFase3PristineSeas2022.gdb", 
+                            layer = "Puntos_DeepSee")
+
+deep_see_pts <- deep_see_pts %>% 
+  sf::st_transform(crs = 4326) %>% 
+  dplyr::mutate(lon = sf::st_coordinates(.)[,1],
+                lat = sf::st_coordinates(.)[,2]) %>% 
+  st_drop_geometry() %>% 
+  select(lon, lat) %>% 
+  mutate(method = deepsee)
+```
+
+```{r}
+dscm_pts <- sf::st_read(dsn = "../../../Desktop/PlanFase3PristineSeas2022.gdb", 
+                            layer = "PuntosDropCam")
+
+dscm_pts <- dscm_pts %>% 
+  sf::st_transform(crs = 4326) %>% 
+  dplyr::mutate(lon = sf::st_coordinates(.)[,1],
+                lat = sf::st_coordinates(.)[,2]) %>% 
+  st_drop_geometry() %>% 
+  select(lon, lat) %>% 
+  mutate(method = "dropcam")
+```
+```{r}
+deep_see_pts %>% 
+  bind_rows(dscm_pts) %>% 
+  sf::st_write(file.path(project_path, 
+                         "data", "02_processed_data", "seaflower_dscm_sub_pts.csv"))
 ```
 
 

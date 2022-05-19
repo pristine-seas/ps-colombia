@@ -88,12 +88,6 @@ smts_leg_1 %>%
 ```
 
 ```{r}
-ggplot(smts_leg_1)+
-  geom_sf()+
-  geom_sf(data = colombia_eez, linetype = "dashed", size = .25, fill = "transparent")
-```
-
-```{r}
 col_background_plot +
   geom_sf(data = col_smts %>% 
             filter(st_within(., st_union(colombia_pacific_eez), sparse = FALSE)[,1]),
@@ -117,6 +111,12 @@ col_background_plot +
   ggsave(filename = file.path(project_path, "figures", "seamounts_yurupari_malpelo.png"), 
          dpi = 300, width = 7, height = 5)
 ```
+```{r}
+smts_leg_1 %>% 
+  sf::st_write(file.path(project_path, "data", "02_processed_data", "seamounts_leg_1.gpkg"))
+```
+
+
 ## Regimen Comun
 
 ```{r}
@@ -157,3 +157,29 @@ bind_rows(smts_leg_3,
   mutate_at(vars(lon, lat), round, 5) %>% 
   write_csv(file.path(project_path, "data", "03_output_data", "seamounts_in_rois.csv"))
 ```
+
+# INVEMAR drop stations in Colinas y Lomas
+
+```{r}
+invemar_drops <- read_csv(file.path(project_path, "data", "01_raw_data", "invemar_drop_coords.csv")) 
+
+invemar_drops_sf <- invemar_drops %>% 
+    st_as_sf(coords = c("longitud", "latitud"),
+           crs = 4326) %>% 
+  st_transform(crs = col_crs) 
+
+invemar_drops_sf %>% 
+  sf::st_write(file.path(project_path, "data", "02_processed_data", "invemar_drops.gpkg"))
+
+```
+
+```{r}
+invemar_drops %>% 
+  mutate(lon = measurements::conv_unit(longitud,
+                                       to = 'deg_dec_min', 
+                                       from = 'dec_deg'),
+         lat = measurements::conv_unit(latitud,
+                                       to = 'deg_dec_min', 
+                                       from = 'dec_deg'))
+```
+
